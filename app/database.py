@@ -18,7 +18,6 @@ async def get_db():
 async def init_db():
     async with engine.begin() as conn:
         # In production, use Alembic for migrations
-        # For dev, we only create tables if they don't exist.
-        # previously we dropped all to apply schema changes, but now we want to persist data.
+        # For dev, drop all to apply schema changes (User requested reset)
         # await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)

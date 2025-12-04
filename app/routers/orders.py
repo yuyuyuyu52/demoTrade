@@ -25,7 +25,8 @@ async def create_order(order_in: OrderCreate, db: AsyncSession = Depends(get_db)
         side=order_in.side,
         order_type=order_in.order_type,
         quantity=order_in.quantity,
-        price=order_in.price,
+        limit_price=order_in.price if order_in.order_type == OrderType.LIMIT else None,
+        price=0.0,
         leverage=order_in.leverage,
         status=OrderStatus.NEW
     )
