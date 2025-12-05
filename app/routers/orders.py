@@ -5,7 +5,7 @@ from typing import List
 
 from app.database import get_db
 from app.models import Order, Account, OrderType, OrderStatus
-from app.schemas import OrderCreate, OrderResponse
+from app.schemas import OrderCreate, OrderResponse, OrderUpdate
 from app.services.matching_engine import matching_engine
 from app.services.binance_ws import get_current_price
 
@@ -71,6 +71,25 @@ async def cancel_order(order_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Order cannot be cancelled")
 
     order.status = OrderStatus.CANCELED
+    await db.commit()
+    await db.refresh(order)
+    return order
+
+@router.patch("/{order_id}", response_model=OrderResponse)
+async def update_order(order_id: int, order_update: OrderUpdate, db: AsyncSession = Depends(get_db)):
+    order = await db.get(Order, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    if order.status != OrderStatus.NEW:
+        raise HTTPException(status_code=400, detail="Cannot update order that is not NEW")
+
+    if order_update.price is not None:
+        order.limit_price = order_update.price
+    
+    if order_update.quantity is not None:
+        order.quantity = order_update.quantity
+
     await db.commit()
     await db.refresh(order)
     return order

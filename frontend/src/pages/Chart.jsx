@@ -12,6 +12,9 @@ export default function Chart() {
   const crosshairPriceRef = useRef(null);
   const draggingLineRef = useRef(null);
   const labelsContainerRef = useRef(null); // Container for custom HTML labels
+  const allDataRef = useRef([]); // Store all loaded data
+  const isLoadingRef = useRef(false);
+  const hasMoreRef = useRef(true);
   
   // Initialize state from localStorage if available
   const [symbol, setSymbol] = useState(() => localStorage.getItem('chart_symbol') || 'BTCUSDT');
@@ -406,6 +409,9 @@ export default function Chart() {
           });
 
           if (closestLine) {
+              // Prevent dragging for Position lines
+              if (closestLine.draggableInfo.type === 'POS') return;
+
               draggingLineRef.current = closestLine;
               setDraggingLine(closestLine); // Trigger re-render if needed, or just for UI state
               
@@ -436,6 +442,9 @@ export default function Chart() {
               let hovering = false;
               priceLinesRef.current.forEach(item => {
                   if (!item.draggableInfo) return;
+                  // Skip hover effect for POS lines
+                  if (item.draggableInfo.type === 'POS') return;
+
                   const lineY = seriesRef.current.priceToCoordinate(item.price);
                   if (lineY !== null && Math.abs(y - lineY) < 10) {
                       hovering = true;
@@ -449,22 +458,31 @@ export default function Chart() {
           const currentDraggingLine = draggingLineRef.current;
           if (currentDraggingLine) {
               // Commit change
-              const { type, positionId } = currentDraggingLine.draggableInfo;
+              const { type, positionId, orderId } = currentDraggingLine.draggableInfo;
               const newPrice = currentDraggingLine.price;
               
               try {
-                  const payload = {};
-                  if (type === 'TP') payload.take_profit_price = newPrice;
-                  if (type === 'SL') payload.stop_loss_price = newPrice;
-                  
-                  await fetch(`/api/positions/${positionId}`, {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify(payload)
-                  });
-                  console.log(`Updated ${type} for position ${positionId} to ${newPrice}`);
+                  if (type === 'TP' || type === 'SL') {
+                      const payload = {};
+                      if (type === 'TP') payload.take_profit_price = newPrice;
+                      if (type === 'SL') payload.stop_loss_price = newPrice;
+                      
+                      await fetch(`/api/positions/${positionId}`, {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(payload)
+                      });
+                      console.log(`Updated ${type} for position ${positionId} to ${newPrice}`);
+                  } else if (type === 'ORDER') {
+                      await fetch(`/api/orders/${orderId}`, {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ price: newPrice })
+                      });
+                      console.log(`Updated Order ${orderId} price to ${newPrice}`);
+                  }
               } catch (err) {
-                  console.error("Failed to update position", err);
+                  console.error("Failed to update", err);
               }
 
               draggingLineRef.current = null;
@@ -544,13 +562,21 @@ export default function Chart() {
 
     let ws = null;
 
-    const fetchData = async () => {
+    const loadData = async (endTime = null) => {
+      if (isLoadingRef.current) return;
+      if (endTime && !hasMoreRef.current) return;
+
+      isLoadingRef.current = true;
+
       try {
         setError(null);
         // Use proxy for Binance API to avoid CORS
-        const response = await fetch(
-          `/api/market/klines?symbol=${symbol}&interval=${timeframe}&limit=1000`
-        );
+        let url = `/api/market/klines?symbol=${symbol}&interval=${timeframe}&limit=1000`;
+        if (endTime) {
+            url += `&endTime=${endTime}`;
+        }
+
+        const response = await fetch(url);
         
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -572,24 +598,77 @@ export default function Chart() {
 
         cdata.sort((a, b) => a.time - b.time);
         
-        // Check if series is still valid before setting data
-        if (seriesRef.current && chartRef.current) {
-            newSeries.setData(cdata);
-        }
-        if (cdata.length > 0) {
-            lastPriceRef.current = cdata[cdata.length - 1].close;
+        if (cdata.length === 0) {
+            if (endTime) hasMoreRef.current = false;
+        } else {
+            if (endTime) {
+                // Prepend data
+                // Filter out duplicates based on time
+                const existingTimes = new Set(allDataRef.current.map(d => d.time));
+                const uniqueNewData = cdata.filter(d => !existingTimes.has(d.time));
+                
+                if (uniqueNewData.length === 0) {
+                    hasMoreRef.current = false;
+                } else {
+                    allDataRef.current = [...uniqueNewData, ...allDataRef.current];
+                }
+            } else {
+                // Initial load
+                allDataRef.current = cdata;
+                hasMoreRef.current = true;
+            }
+
+            // Check if series is still valid before setting data
+            if (seriesRef.current && chartRef.current) {
+                seriesRef.current.setData(allDataRef.current);
+            }
+            
+            if (!endTime && cdata.length > 0) {
+                lastPriceRef.current = cdata[cdata.length - 1].close;
+            }
         }
 
-        // Initial overlay update
-        updateOverlayData();
+        // Initial overlay update (only on first load)
+        if (!endTime) {
+            updateOverlayData();
+        }
 
-        // WebSocket
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = window.location.host;
-        // Use local proxy to avoid CORS/Network issues
-        const wsUrl = `${protocol}//${host}/api/market/ws/klines/${symbol}/${timeframe}`;
-        
-        ws = new WebSocket(wsUrl);
+      } catch (err) {
+        console.error("Chart Error:", err);
+        setError(err.message);
+      } finally {
+        isLoadingRef.current = false;
+      }
+    };
+
+    // Initial load
+    loadData();
+
+    // Subscribe to visible logical range change for infinite scrolling
+    let scrollTimeout = null;
+    chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+        if (scrollTimeout) return; // Throttle
+
+        scrollTimeout = setTimeout(() => {
+            scrollTimeout = null;
+            if (range && range.from < 10 && !isLoadingRef.current && hasMoreRef.current) {
+                 const firstData = allDataRef.current[0];
+                 if (firstData) {
+                     // Binance API expects milliseconds for endTime
+                     // We want data BEFORE this candle.
+                     loadData(firstData.time * 1000 - 1);
+                 }
+            }
+        }, 200); // Check every 200ms
+    });
+
+    // WebSocket
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    // Use local proxy to avoid CORS/Network issues
+    const wsUrl = `${protocol}//${host}/api/market/ws/klines/${symbol}/${timeframe}`;
+    
+    ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
             console.log('Connected to WS Proxy');
@@ -631,16 +710,10 @@ export default function Chart() {
         };
 
         ws.onerror = (err) => {
+            // Ignore errors if we are disposing/unmounting
+            if (isDisposed) return;
             console.error('WS Error:', err);
         };
-
-      } catch (err) {
-        console.error("Chart Error:", err);
-        setError(err.message);
-      }
-    };
-
-    fetchData();
 
     // Poll for overlay updates every 5 seconds
     const overlayInterval = setInterval(updateOverlayData, 5000);

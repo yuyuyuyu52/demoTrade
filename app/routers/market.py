@@ -10,8 +10,10 @@ router = APIRouter(prefix="/market", tags=["market"])
 async def get_prices():
     return get_all_prices()
 
+from typing import Optional
+
 @router.get("/klines")
-async def get_klines(symbol: str, interval: str, limit: int = 1000):
+async def get_klines(symbol: str, interval: str, limit: int = 1000, endTime: Optional[int] = None):
     # Use Binance Futures API
     url = "https://fapi.binance.com/fapi/v1/klines"
     params = {
@@ -19,6 +21,9 @@ async def get_klines(symbol: str, interval: str, limit: int = 1000):
         "interval": interval,
         "limit": limit
     }
+    if endTime:
+        params["endTime"] = endTime
+        
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(url, params=params) as response:

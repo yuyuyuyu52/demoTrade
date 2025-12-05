@@ -108,3 +108,7 @@ class AccountStatistics(BaseModel):
 
     class Config:
         from_attributes = True
+
+class OrderUpdate(BaseModel):
+    price: Optional[float] = None
+    quantity: Optional[float] = None
