@@ -11,6 +11,7 @@ export default function Chart() {
   const lastPriceRef = useRef(null);
   const crosshairPriceRef = useRef(null);
   const draggingLineRef = useRef(null);
+  const labelsContainerRef = useRef(null); // Container for custom HTML labels
   
   const [symbol, setSymbol] = useState('BTCUSDT');
   const [timeframe, setTimeframe] = useState('1h');
@@ -18,17 +19,20 @@ export default function Chart() {
   const [error, setError] = useState(null);
   const [draggingLine, setDraggingLine] = useState(null);
 
-  // Helper to clear all price lines
+  // Helper to clear all price lines and labels
   const clearPriceLines = () => {
     if (seriesRef.current && priceLinesRef.current.length > 0) {
       priceLinesRef.current.forEach(item => {
         seriesRef.current.removePriceLine(item.line);
+        if (item.labelElement) {
+            item.labelElement.remove();
+        }
       });
       priceLinesRef.current = [];
     }
   };
 
-  // Helper to add a price line
+  // Helper to add a price line with custom label
   const addPriceLine = (price, title, color, style = LineStyle.Solid, draggableInfo = null) => {
     if (!seriesRef.current) return;
     const priceVal = parseFloat(price);
@@ -39,15 +43,97 @@ export default function Chart() {
       color: color,
       lineWidth: 1,
       lineStyle: style,
-      axisLabelVisible: true,
-      title: title,
+      axisLabelVisible: false, // Disable built-in axis label
+      title: '', // No title for built-in line
     });
     
+    // Create custom HTML label
+    let labelElement = null;
+    if (labelsContainerRef.current) {
+        labelElement = document.createElement('div');
+        labelElement.style.position = 'absolute';
+        labelElement.style.right = '90px'; // Move further left
+        labelElement.style.backgroundColor = color;
+        labelElement.style.color = '#fff';
+        labelElement.style.padding = '1px 4px';
+        labelElement.style.fontSize = '10px';
+        labelElement.style.borderRadius = '2px';
+        labelElement.style.pointerEvents = 'none'; // Let clicks pass through
+        labelElement.style.zIndex = '10';
+        labelElement.style.transform = 'translateY(-50%)'; // Center vertically
+        labelElement.style.whiteSpace = 'nowrap'; // Prevent wrapping
+        labelElement.style.display = 'flex';
+        labelElement.style.alignItems = 'center';
+        labelElement.style.gap = '4px';
+
+        // Add Buttons for Position Line
+        if (draggableInfo && draggableInfo.type === 'POS') {
+            const createBtn = (text, type) => {
+                const btn = document.createElement('button');
+                btn.innerText = text;
+                btn.style.pointerEvents = 'auto';
+                btn.style.cursor = 'pointer';
+                btn.style.border = 'none';
+                btn.style.borderRadius = '2px';
+                btn.style.padding = '1px 3px';
+                btn.style.fontSize = '9px';
+                btn.style.fontWeight = 'bold';
+                btn.style.color = 'white';
+                btn.style.backgroundColor = type === 'TP' ? '#26a69a' : '#ef5350';
+                btn.style.lineHeight = '1';
+                
+                btn.onclick = (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    
+                    // Find existing line or create new one
+                    let targetLine = priceLinesRef.current.find(
+                        item => item.draggableInfo && item.draggableInfo.type === type && item.draggableInfo.positionId === draggableInfo.positionId
+                    );
+
+                    if (!targetLine) {
+                        // Create new line starting at current position price
+                        const color = type === 'TP' ? '#26a69a' : '#ef5350';
+                        // Recursively call addPriceLine to create the line
+                        // Note: We pass the same draggableInfo but with the specific type (TP/SL)
+                        addPriceLine(priceVal, type, color, LineStyle.Dashed, { type, positionId: draggableInfo.positionId });
+                        
+                        // The new line is the last one added
+                        targetLine = priceLinesRef.current[priceLinesRef.current.length - 1];
+                    }
+
+                    if (targetLine) {
+                        draggingLineRef.current = targetLine;
+                        setDraggingLine(targetLine);
+                        
+                        // Disable chart scrolling
+                        if (chartRef.current) {
+                            chartRef.current.timeScale().applyOptions({ shiftVisibleRangeOnNewBar: false });
+                            chartRef.current.applyOptions({ handleScroll: false, handleScale: false });
+                        }
+                    }
+                };
+                return btn;
+            };
+
+            labelElement.appendChild(createBtn('TP', 'TP'));
+            labelElement.appendChild(createBtn('SL', 'SL'));
+        }
+
+        // Add Title Text
+        const textSpan = document.createElement('span');
+        textSpan.innerHTML = title;
+        labelElement.appendChild(textSpan);
+
+        labelsContainerRef.current.appendChild(labelElement);
+    }
+
     // Store line with metadata
     priceLinesRef.current.push({
         line,
         price: priceVal,
-        draggableInfo // { type: 'TP' | 'SL', positionId: number }
+        draggableInfo, // { type: 'TP' | 'SL', positionId: number }
+        labelElement
     });
   };
 
@@ -72,8 +158,15 @@ export default function Chart() {
           accData.positions.forEach(pos => {
             if (pos.symbol === symbol) {
               // Entry Price
-              const pnlText = pos.unrealized_pnl ? ` (PNL: ${parseFloat(pos.unrealized_pnl).toFixed(2)})` : '';
-              addPriceLine(pos.entry_price, `Pos: ${pos.quantity}${pnlText}`, '#2962FF', LineStyle.Solid);
+              let pnlHtml = '';
+              if (pos.unrealized_pnl) {
+                  const pnl = parseFloat(pos.unrealized_pnl);
+                  const pnlColor = pnl >= 0 ? '#00E676' : '#FF5252'; // Green or Red
+                  const sign = pnl >= 0 ? '+' : '';
+                  pnlHtml = ` <span style="color: ${pnlColor}; font-weight: bold;">${sign}${pnl.toFixed(2)}</span>`;
+              }
+              
+              addPriceLine(pos.entry_price, `Pos ${pos.quantity}${pnlHtml}`, '#2962FF', LineStyle.Solid, { type: 'POS', positionId: pos.id });
               
               // SL/TP
               if (pos.stop_loss_price) {
@@ -100,7 +193,7 @@ export default function Chart() {
             if (order.symbol === symbol && order.status === 'NEW') {
                // Limit Order Price
                if (order.limit_price) {
-                   addPriceLine(order.limit_price, `Order: ${order.side} ${order.quantity}`, '#FF9800', LineStyle.Dotted);
+                   addPriceLine(order.limit_price, `${order.side} ${order.quantity}`, '#FF9800', LineStyle.Dotted);
                }
             }
           });
@@ -196,6 +289,9 @@ export default function Chart() {
 
       const handleMouseDown = (e) => {
           if (!seriesRef.current || !chartRef.current) return;
+          // If already dragging/placing, don't select another line
+          if (draggingLineRef.current) return;
+
           const rect = container.getBoundingClientRect();
           const y = e.clientY - rect.top;
           
@@ -246,6 +342,7 @@ export default function Chart() {
                   // Update line visually
                   currentDraggingLine.line.applyOptions({ price: newPrice });
                   currentDraggingLine.price = newPrice; 
+                  // Label will be updated by syncLabels loop
               }
           } else {
               // Hover effect
@@ -324,6 +421,11 @@ export default function Chart() {
       grid: {
         vertLines: { color: '#f0f3fa' },
         horzLines: { color: '#f0f3fa' },
+      },
+      crosshair: {
+        horzLine: {
+            labelVisible: false,
+        },
       },
       timeScale: {
         timeVisible: true,
@@ -459,8 +561,29 @@ export default function Chart() {
     };
     window.addEventListener('resize', handleResize);
 
+    // Sync labels loop
+    let animationFrameId;
+    const syncLabels = () => {
+        if (seriesRef.current && priceLinesRef.current.length > 0) {
+            priceLinesRef.current.forEach(item => {
+                if (item.labelElement) {
+                    const y = seriesRef.current.priceToCoordinate(item.price);
+                    if (y === null) {
+                        item.labelElement.style.display = 'none';
+                    } else {
+                        item.labelElement.style.display = 'block';
+                        item.labelElement.style.top = `${y}px`;
+                    }
+                }
+            });
+        }
+        animationFrameId = requestAnimationFrame(syncLabels);
+    };
+    syncLabels();
+
     return () => {
       window.removeEventListener('resize', handleResize);
+      cancelAnimationFrame(animationFrameId);
       clearInterval(overlayInterval);
       if (ws) ws.close();
       
@@ -519,11 +642,13 @@ export default function Chart() {
         </div>
       )}
 
-      <div 
-        ref={chartContainerRef} 
-        style={{ height: '600px', width: '100%', backgroundColor: '#eee', cursor: draggingLine ? 'ns-resize' : 'default' }}
-        className="border rounded-lg shadow-md relative"
-      />
+      <div className="relative border rounded-lg shadow-md" style={{ height: '600px', width: '100%' }}>
+        <div 
+            ref={chartContainerRef} 
+            style={{ height: '100%', width: '100%', backgroundColor: '#eee', cursor: draggingLine ? 'ns-resize' : 'default' }}
+        />
+        <div ref={labelsContainerRef} className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 10 }} />
+      </div>
     </div>
   );
 }
