@@ -19,6 +19,7 @@ class MatchingEngine:
             try:
                 async with AsyncSessionLocal() as session:
                     await self.process_open_orders(session)
+                    await self.check_positions_tp_sl(session)
             except Exception as e:
                 logger.error(f"Error in matching engine loop: {e}")
             
@@ -96,12 +97,23 @@ class MatchingEngine:
             order.status = OrderStatus.PARTIALLY_FILLED
         
         # Update Account & Position
-        await self.update_account_and_position(session, order.account_id, order.symbol, order.side, price, fill_qty, order.leverage, fee)
+        await self.update_account_and_position(
+            session, 
+            order.account_id, 
+            order.symbol, 
+            order.side, 
+            price, 
+            fill_qty, 
+            order.leverage, 
+            fee,
+            order.take_profit_price,
+            order.stop_loss_price
+        )
         
         await session.commit()
         logger.info(f"Executed trade for Order {order.id}: {order.side} {fill_qty} {order.symbol} @ {price} Fee: {fee}")
 
-    async def update_account_and_position(self, session: AsyncSession, account_id: int, symbol: str, side: OrderSide, price: float, quantity: float, leverage: int = 1, fee: float = 0.0):
+    async def update_account_and_position(self, session: AsyncSession, account_id: int, symbol: str, side: OrderSide, price: float, quantity: float, leverage: int = 1, fee: float = 0.0, take_profit_price: float = None, stop_loss_price: float = None):
         # Fetch Account
         account = await session.get(Account, account_id)
         if not account:
@@ -137,7 +149,9 @@ class MatchingEngine:
                     entry_price=price,
                     leverage=leverage,
                     margin=margin_required,
-                    accumulated_fees=fee
+                    accumulated_fees=fee,
+                    take_profit_price=take_profit_price,
+                    stop_loss_price=stop_loss_price
                 )
                 session.add(position)
             else: # SELL
@@ -152,7 +166,9 @@ class MatchingEngine:
                     entry_price=price,
                     leverage=leverage,
                     margin=margin_required,
-                    accumulated_fees=fee
+                    accumulated_fees=fee,
+                    take_profit_price=take_profit_price,
+                    stop_loss_price=stop_loss_price
                 )
                 session.add(position)
         else:
@@ -160,6 +176,12 @@ class MatchingEngine:
             # Update accumulated fees
             position.accumulated_fees += fee
             
+            # Update TP/SL if provided
+            if take_profit_price is not None:
+                position.take_profit_price = take_profit_price
+            if stop_loss_price is not None:
+                position.stop_loss_price = stop_loss_price
+
             current_qty = position.quantity
             
             if current_qty > 0: # Currently LONG
@@ -203,11 +225,7 @@ class MatchingEngine:
                             quantity=close_qty, # This might be misleading if it was a partial close before. 
                             # But we don't track original quantity. Let's just store 0 or the last close qty?
                             # Or maybe we should store the max quantity this position ever had? Too complex for now.
-                            # Let's store the quantity that was just closed, or 0.
-                            # Actually, PositionHistory usually shows the "Trade" or the "Roundtrip".
-                            # If we want "Position History", it implies the whole lifecycle.
-                            # Let's just put 0 for quantity as it is closed, or maybe the total volume?
-                            # Let's put 0.
+                            # Let's store 0.
                             entry_price=position.entry_price,
                             exit_price=price,
                             leverage=position.leverage,
@@ -248,7 +266,9 @@ class MatchingEngine:
                             entry_price=price,
                             leverage=leverage,
                             margin=margin_required,
-                            accumulated_fees=0.0
+                            accumulated_fees=0.0,
+                            take_profit_price=take_profit_price,
+                            stop_loss_price=stop_loss_price
                         )
                         session.add(new_pos)
 
@@ -313,8 +333,67 @@ class MatchingEngine:
                             entry_price=price,
                             leverage=leverage,
                             margin=margin_required,
-                            accumulated_fees=0.0
+                            accumulated_fees=0.0,
+                            take_profit_price=take_profit_price,
+                            stop_loss_price=stop_loss_price
                         )
                         session.add(new_pos)
+
+    async def check_positions_tp_sl(self, session: AsyncSession):
+        # Fetch all positions with TP or SL
+        stmt = select(Position).where(
+            (Position.take_profit_price.isnot(None)) | (Position.stop_loss_price.isnot(None))
+        )
+        result = await session.execute(stmt)
+        positions = result.scalars().all()
+
+        for position in positions:
+            current_price = get_current_price(position.symbol)
+            if current_price is None or current_price <= 0:
+                continue
+
+            should_close = False
+            close_reason = ""
+
+            # Long Position
+            if position.quantity > 0:
+                if position.take_profit_price and current_price >= position.take_profit_price:
+                    should_close = True
+                    close_reason = "TP"
+                elif position.stop_loss_price and current_price <= position.stop_loss_price:
+                    should_close = True
+                    close_reason = "SL"
+            
+            # Short Position
+            elif position.quantity < 0:
+                if position.take_profit_price and current_price <= position.take_profit_price:
+                    should_close = True
+                    close_reason = "TP"
+                elif position.stop_loss_price and current_price >= position.stop_loss_price:
+                    should_close = True
+                    close_reason = "SL"
+
+            if should_close:
+                logger.info(f"Triggering {close_reason} for Position {position.id} {position.symbol} @ {current_price}")
+                # Create a Market Order to close the position
+                side = OrderSide.SELL if position.quantity > 0 else OrderSide.BUY
+                
+                # Create Order
+                close_order = Order(
+                    account_id=position.account_id,
+                    symbol=position.symbol,
+                    side=side,
+                    order_type=OrderType.MARKET,
+                    quantity=abs(position.quantity),
+                    price=0.0,
+                    leverage=position.leverage,
+                    status=OrderStatus.NEW
+                )
+                session.add(close_order)
+                await session.commit()
+                await session.refresh(close_order)
+                
+                # Execute immediately
+                await self.execute_trade(session, close_order, current_price)
 
 matching_engine = MatchingEngine()

@@ -80,6 +80,9 @@ class Position(Base):
     realized_pnl: Mapped[float] = mapped_column(Float, default=0.0) # Cumulative realized PNL for this position
     accumulated_fees: Mapped[float] = mapped_column(Float, default=0.0)
     
+    take_profit_price: Mapped[float] = mapped_column(Float, nullable=True)
+    stop_loss_price: Mapped[float] = mapped_column(Float, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
     
@@ -97,6 +100,10 @@ class Order(Base):
     price: Mapped[float] = mapped_column(Float, default=0.0) # The average execution price
     quantity: Mapped[float] = mapped_column(Float)
     leverage: Mapped[int] = mapped_column(Integer, default=1)
+    
+    take_profit_price: Mapped[float] = mapped_column(Float, nullable=True)
+    stop_loss_price: Mapped[float] = mapped_column(Float, nullable=True)
+
     filled_quantity: Mapped[float] = mapped_column(Float, default=0.0)
     fee: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[OrderStatus] = mapped_column(String, default=OrderStatus.NEW)

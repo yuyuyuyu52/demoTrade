@@ -9,6 +9,7 @@ export default defineConfig({
       '/accounts': 'http://localhost:8000',
       '/market': 'http://localhost:8000',
       '/orders': 'http://localhost:8000',
+      '/positions': 'http://localhost:8000',
     }
   }
 })

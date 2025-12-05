@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 
 from app.database import init_db
-from app.routers import orders, accounts, market
+from app.routers import orders, accounts, market, positions
 from app.services.binance_ws import binance_ws_service
 from app.services.matching_engine import matching_engine
 from app.services.equity_recorder import equity_recorder
@@ -44,6 +44,7 @@ app.add_middleware(
 app.include_router(orders.router)
 app.include_router(accounts.router)
 app.include_router(market.router)
+app.include_router(positions.router)
 
 @app.get("/")
 async def root():

@@ -13,11 +13,19 @@ export default function Trading() {
     order_type: 'MARKET',
     quantity: 0.01,
     price: 30000,
-    leverage: 20
+    leverage: 20,
+    take_profit_price: '',
+    stop_loss_price: ''
   });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ text: '', type: '' });
   const [initialLoad, setInitialLoad] = useState(true);
+  const [tpSlModal, setTpSlModal] = useState({
+    isOpen: false,
+    position: null,
+    take_profit_price: '',
+    stop_loss_price: ''
+  });
 
   useEffect(() => {
     if (user) {
@@ -83,7 +91,9 @@ export default function Trading() {
         order_type: orderForm.order_type,
         quantity: parseFloat(orderForm.quantity),
         price: orderForm.order_type === 'LIMIT' ? parseFloat(orderForm.price) : null,
-        leverage: parseInt(orderForm.leverage)
+        leverage: parseInt(orderForm.leverage),
+        take_profit_price: orderForm.take_profit_price ? parseFloat(orderForm.take_profit_price) : null,
+        stop_loss_price: orderForm.stop_loss_price ? parseFloat(orderForm.stop_loss_price) : null
       };
       await axios.post(`${API_URL}/orders/`, payload);
       setMessage({ text: 'Order placed successfully!', type: 'success' });
@@ -113,6 +123,43 @@ export default function Trading() {
       fetchAccount();
     } catch (error) {
       setMessage({ text: 'Failed to close position: ' + (error.response?.data?.detail || error.message), type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openTpSlModal = (pos) => {
+    setTpSlModal({
+      isOpen: true,
+      position: pos,
+      take_profit_price: pos.take_profit_price || '',
+      stop_loss_price: pos.stop_loss_price || ''
+    });
+  };
+
+  const closeTpSlModal = () => {
+    setTpSlModal({
+      isOpen: false,
+      position: null,
+      take_profit_price: '',
+      stop_loss_price: ''
+    });
+  };
+
+  const submitTpSl = async () => {
+    if (!tpSlModal.position) return;
+    setLoading(true);
+    try {
+      const payload = {
+        take_profit_price: tpSlModal.take_profit_price ? parseFloat(tpSlModal.take_profit_price) : null,
+        stop_loss_price: tpSlModal.stop_loss_price ? parseFloat(tpSlModal.stop_loss_price) : null
+      };
+      await axios.patch(`${API_URL}/positions/${tpSlModal.position.id}`, payload);
+      setMessage({ text: 'TP/SL updated successfully!', type: 'success' });
+      fetchAccount();
+      closeTpSlModal();
+    } catch (error) {
+      setMessage({ text: 'Failed to update TP/SL: ' + (error.response?.data?.detail || error.message), type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -192,6 +239,30 @@ export default function Trading() {
               </div>
             )}
             <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Take Profit</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={orderForm.take_profit_price}
+                  onChange={(e) => setOrderForm({ ...orderForm, take_profit_price: e.target.value })}
+                  className="mt-1 block w-full border p-2 rounded"
+                  placeholder="Optional"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Stop Loss</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={orderForm.stop_loss_price}
+                  onChange={(e) => setOrderForm({ ...orderForm, stop_loss_price: e.target.value })}
+                  className="mt-1 block w-full border p-2 rounded"
+                  placeholder="Optional"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
               <button
                 onClick={() => placeOrder('BUY')}
                 disabled={loading}
@@ -263,6 +334,7 @@ export default function Trading() {
                 <th className="py-2">Size</th>
                 <th className="py-2">Entry Price</th>
                 <th className="py-2">Mark Price</th>
+                <th className="py-2">TP/SL</th>
                 <th className="py-2">PNL</th>
                 <th className="py-2">Lev.</th>
                 <th className="py-2">Open Time</th>
@@ -278,12 +350,21 @@ export default function Trading() {
                   </td>
                   <td className="py-2">${formatNumber(pos.entry_price)}</td>
                   <td className="py-2">${formatNumber(prices[pos.symbol] || 0)}</td>
+                  <td className="py-2 text-xs">
+                    {pos.take_profit_price ? formatNumber(pos.take_profit_price) : '-'} / {pos.stop_loss_price ? formatNumber(pos.stop_loss_price) : '-'}
+                  </td>
                   <td className={`py-2 ${pos.unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                     ${formatNumber(pos.unrealized_pnl)}
                   </td>
                   <td className="py-2">{pos.leverage}x</td>
                   <td className="py-2 text-xs text-gray-500">{formatDate(pos.created_at)}</td>
                   <td className="py-2">
+                    <button
+                      onClick={() => openTpSlModal(pos)}
+                      className="bg-blue-500 text-white px-3 py-1 rounded text-xs hover:bg-blue-600 mr-2"
+                    >
+                      TP/SL
+                    </button>
                     <button
                       onClick={() => closePosition(pos)}
                       className="bg-red-500 text-white px-3 py-1 rounded text-xs hover:bg-red-600"
@@ -297,6 +378,54 @@ export default function Trading() {
           </table>
         )}
       </div>
+
+      {/* TP/SL Modal */}
+      {tpSlModal.isOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-lg w-96">
+            <h3 className="text-lg font-semibold mb-4">Edit TP/SL for {tpSlModal.position?.symbol}</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Take Profit</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={tpSlModal.take_profit_price}
+                  onChange={(e) => setTpSlModal({ ...tpSlModal, take_profit_price: e.target.value })}
+                  className="mt-1 block w-full border p-2 rounded"
+                  placeholder="Optional"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Stop Loss</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={tpSlModal.stop_loss_price}
+                  onChange={(e) => setTpSlModal({ ...tpSlModal, stop_loss_price: e.target.value })}
+                  className="mt-1 block w-full border p-2 rounded"
+                  placeholder="Optional"
+                />
+              </div>
+              <div className="flex justify-end space-x-2 mt-4">
+                <button
+                  onClick={closeTpSlModal}
+                  className="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={submitTpSl}
+                  disabled={loading}
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {loading ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

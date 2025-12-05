@@ -11,6 +11,8 @@ class OrderCreate(BaseModel):
     quantity: float
     price: Optional[float] = None
     leverage: int = 1
+    take_profit_price: Optional[float] = None
+    stop_loss_price: Optional[float] = None
 
 class OrderResponse(BaseModel):
     id: int
@@ -39,17 +41,24 @@ class EquityHistoryResponse(BaseModel):
         from_attributes = True
 
 class PositionResponse(BaseModel):
+    id: int
     symbol: str
     quantity: float
     entry_price: float
     leverage: int
     margin: float
     liquidation_price: float
+    take_profit_price: Optional[float] = None
+    stop_loss_price: Optional[float] = None
     unrealized_pnl: Optional[float] = 0.0
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+class PositionUpdate(BaseModel):
+    take_profit_price: Optional[float] = None
+    stop_loss_price: Optional[float] = None
 
 class PositionHistoryResponse(BaseModel):
     symbol: str
