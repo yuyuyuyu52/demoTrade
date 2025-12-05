@@ -13,11 +13,22 @@ export default function Chart() {
   const draggingLineRef = useRef(null);
   const labelsContainerRef = useRef(null); // Container for custom HTML labels
   
-  const [symbol, setSymbol] = useState('BTCUSDT');
-  const [timeframe, setTimeframe] = useState('1h');
-  const [quantity, setQuantity] = useState(0.01);
+  // Initialize state from localStorage if available
+  const [symbol, setSymbol] = useState(() => localStorage.getItem('chart_symbol') || 'BTCUSDT');
+  const [timeframe, setTimeframe] = useState(() => localStorage.getItem('chart_timeframe') || '1h');
+  const [quantity, setQuantity] = useState(() => {
+      const saved = localStorage.getItem('chart_quantity');
+      return saved ? parseFloat(saved) : 0.01;
+  });
   const [error, setError] = useState(null);
   const [draggingLine, setDraggingLine] = useState(null);
+
+  // Save settings to localStorage whenever they change
+  useEffect(() => {
+      localStorage.setItem('chart_symbol', symbol);
+      localStorage.setItem('chart_timeframe', timeframe);
+      localStorage.setItem('chart_quantity', quantity);
+  }, [symbol, timeframe, quantity]);
 
   // Helper to clear all price lines and labels
   const clearPriceLines = () => {
