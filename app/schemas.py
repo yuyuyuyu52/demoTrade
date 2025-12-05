@@ -79,6 +79,8 @@ class AccountResponse(BaseModel):
     user_id: str
     balance: float
     leverage: int
+    last_timeframe: Optional[str] = "1h"
+    last_quantity: Optional[float] = 0.01
     equity: Optional[float] = 0.0
     unrealized_pnl: Optional[float] = 0.0
     positions: List[PositionResponse] = []
@@ -87,7 +89,9 @@ class AccountResponse(BaseModel):
         from_attributes = True
 
 class AccountUpdate(BaseModel):
-    leverage: int
+    leverage: Optional[int] = None
+    last_timeframe: Optional[str] = None
+    last_quantity: Optional[float] = None
 
 class AccountStatistics(BaseModel):
     max_drawdown: float

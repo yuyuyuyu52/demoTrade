@@ -232,7 +232,13 @@ async def update_account(account_id: int, update_data: AccountUpdate, db: AsyncS
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     
-    account.leverage = update_data.leverage
+    if update_data.leverage is not None:
+        account.leverage = update_data.leverage
+    if update_data.last_timeframe is not None:
+        account.last_timeframe = update_data.last_timeframe
+    if update_data.last_quantity is not None:
+        account.last_quantity = update_data.last_quantity
+        
     await db.commit()
     await db.refresh(account)
     
