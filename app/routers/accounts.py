@@ -134,7 +134,10 @@ async def get_account_statistics(account_id: int, db: AsyncSession = Depends(get
     gross_profit = sum([t.realized_pnl for t in wins])
     gross_loss = abs(sum([t.realized_pnl for t in losses]))
     
-    profit_factor = gross_profit / gross_loss if gross_loss > 0 else (float('inf') if gross_profit > 0 else 0.0)
+    if gross_loss > 0:
+        profit_factor = gross_profit / gross_loss
+    else:
+        profit_factor = 0.0 # Avoid infinite value for JSON serialization
     
     # Expectancy = (Win Rate * Avg Win) + (Loss Rate * Avg Loss)  <-- Avg Loss is usually negative
     loss_rate = 1.0 - win_rate

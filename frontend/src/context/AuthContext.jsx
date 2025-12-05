@@ -7,7 +7,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const API_URL = '';
+  const API_URL = '/api';
 
   const login = async (userId) => {
     try {

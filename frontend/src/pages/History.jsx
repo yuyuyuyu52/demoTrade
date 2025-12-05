@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 
-const API_URL = '';
+const API_URL = '/api';
 
 export default function History() {
   const { user } = useAuth();

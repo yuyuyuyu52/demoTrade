@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, History, LineChart, Calendar, BarChart2 } from 'lucide-react';
+import { LayoutDashboard, History, LineChart, Calendar, BarChart2, TrendingUp } from 'lucide-react';
 
 export default function Layout() {
   const { user } = useAuth();
@@ -9,6 +9,7 @@ export default function Layout() {
 
   const navigation = [
     { name: 'Trading', href: '/', icon: LayoutDashboard },
+    { name: 'Chart', href: '/chart', icon: TrendingUp },
     { name: 'History', href: '/history', icon: History },
     { name: 'Equity Curve', href: '/equity', icon: LineChart },
     { name: 'Calendar', href: '/calendar', icon: Calendar },

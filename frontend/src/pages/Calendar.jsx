@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
-const API_URL = '';
+const API_URL = '/api';
 
 export default function Calendar() {
   const { user } = useAuth();

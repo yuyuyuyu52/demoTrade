@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 
-const API_URL = '';
+const API_URL = '/api';
 
 export default function Trading() {
   const { user } = useAuth();
@@ -324,7 +324,7 @@ export default function Trading() {
         </div>
 
         <h3 className="font-semibold mt-4 mb-2">Positions</h3>
-        {account.positions.length === 0 ? (
+        {(!account?.positions?.length) ? (
           <div className="text-gray-500 italic">No open positions</div>
         ) : (
           <table className="w-full text-left border-collapse">

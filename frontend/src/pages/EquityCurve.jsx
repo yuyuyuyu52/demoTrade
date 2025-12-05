@@ -23,7 +23,7 @@ ChartJS.register(
   Legend
 );
 
-const API_URL = '';
+const API_URL = '/api';
 
 export default function EquityCurve() {
   const { user } = useAuth();
@@ -55,6 +55,7 @@ export default function EquityCurve() {
         borderColor: 'rgb(79, 70, 229)',
         backgroundColor: 'rgba(79, 70, 229, 0.5)',
         tension: 0.1,
+        pointRadius: 0,
       },
     ],
   };
