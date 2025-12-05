@@ -7,23 +7,25 @@ export default function Chart() {
   const chartContainerRef = useRef();
   const seriesRef = useRef(null);
   const priceLinesRef = useRef([]);
+  const chartRef = useRef(null);
   
   const [symbol, setSymbol] = useState('BTCUSDT');
   const [timeframe, setTimeframe] = useState('1h');
   const [error, setError] = useState(null);
+  const [draggingLine, setDraggingLine] = useState(null);
 
   // Helper to clear all price lines
   const clearPriceLines = () => {
     if (seriesRef.current && priceLinesRef.current.length > 0) {
-      priceLinesRef.current.forEach(line => {
-        seriesRef.current.removePriceLine(line);
+      priceLinesRef.current.forEach(item => {
+        seriesRef.current.removePriceLine(item.line);
       });
       priceLinesRef.current = [];
     }
   };
 
   // Helper to add a price line
-  const addPriceLine = (price, title, color, style = LineStyle.Solid) => {
+  const addPriceLine = (price, title, color, style = LineStyle.Solid, draggableInfo = null) => {
     if (!seriesRef.current) return;
     const priceVal = parseFloat(price);
     if (isNaN(priceVal)) return;
@@ -36,12 +38,18 @@ export default function Chart() {
       axisLabelVisible: true,
       title: title,
     });
-    priceLinesRef.current.push(line);
+    
+    // Store line with metadata
+    priceLinesRef.current.push({
+        line,
+        price: priceVal,
+        draggableInfo // { type: 'TP' | 'SL', positionId: number }
+    });
   };
 
   // Fetch Account & Orders Data
   const updateOverlayData = useCallback(async () => {
-    if (!user) return;
+    if (!user || draggingLineRef.current) return; // Don't update if dragging
     
     try {
       // 1. Fetch Account (Positions)
@@ -49,6 +57,9 @@ export default function Chart() {
       if (accRes.ok) {
         const accData = await accRes.json();
         
+        // Check if chart is still mounted/valid
+        if (!seriesRef.current) return;
+
         // Clear existing lines before adding new ones
         clearPriceLines();
 
@@ -57,14 +68,15 @@ export default function Chart() {
           accData.positions.forEach(pos => {
             if (pos.symbol === symbol) {
               // Entry Price
-              addPriceLine(pos.entry_price, `Pos: ${pos.quantity}`, '#2962FF', LineStyle.Solid);
+              const pnlText = pos.unrealized_pnl ? ` (PNL: ${parseFloat(pos.unrealized_pnl).toFixed(2)})` : '';
+              addPriceLine(pos.entry_price, `Pos: ${pos.quantity}${pnlText}`, '#2962FF', LineStyle.Solid);
               
               // SL/TP
               if (pos.stop_loss_price) {
-                  addPriceLine(pos.stop_loss_price, 'SL', '#ef5350', LineStyle.Dashed);
+                  addPriceLine(pos.stop_loss_price, 'SL', '#ef5350', LineStyle.Dashed, { type: 'SL', positionId: pos.id });
               }
               if (pos.take_profit_price) {
-                  addPriceLine(pos.take_profit_price, 'TP', '#26a69a', LineStyle.Dashed);
+                  addPriceLine(pos.take_profit_price, 'TP', '#26a69a', LineStyle.Dashed, { type: 'TP', positionId: pos.id });
               }
             }
           });
@@ -75,6 +87,10 @@ export default function Chart() {
       const ordersRes = await fetch(`/api/orders/?account_id=${user.id}`);
       if (ordersRes.ok) {
         const ordersData = await ordersRes.json();
+        
+        // Check if chart is still mounted/valid
+        if (!seriesRef.current) return;
+
         if (Array.isArray(ordersData)) {
           ordersData.forEach(order => {
             if (order.symbol === symbol && order.status === 'NEW') {
@@ -91,6 +107,127 @@ export default function Chart() {
       console.error("Failed to fetch overlay data", err);
     }
   }, [user, symbol]);
+
+  const draggingLineRef = useRef(null);
+
+  // ... existing code ...
+
+  // Handle Dragging Logic (Separate Effect for Event Listeners using Refs)
+  useEffect(() => {
+      const container = chartContainerRef.current;
+      if (!container) return;
+
+      const handleMouseDown = (e) => {
+          if (!seriesRef.current || !chartRef.current) return;
+          const rect = container.getBoundingClientRect();
+          const y = e.clientY - rect.top;
+          
+          // Convert y to price
+          const price = seriesRef.current.coordinateToPrice(y);
+          if (price === null) return;
+
+          // Find closest line
+          let closestLine = null;
+          let minDiff = Infinity;
+          
+          priceLinesRef.current.forEach(item => {
+              if (!item.draggableInfo) return;
+              
+              const lineY = seriesRef.current.priceToCoordinate(item.price);
+              if (lineY === null) return;
+              
+              const diff = Math.abs(y - lineY);
+              if (diff < 10) { // 10px threshold
+                  if (diff < minDiff) {
+                      minDiff = diff;
+                      closestLine = item;
+                  }
+              }
+          });
+
+          if (closestLine) {
+              draggingLineRef.current = closestLine;
+              setDraggingLine(closestLine); // Trigger re-render if needed, or just for UI state
+              
+              // Disable chart scrolling
+              chartRef.current.timeScale().applyOptions({ shiftVisibleRangeOnNewBar: false });
+              chartRef.current.applyOptions({ handleScroll: false, handleScale: false });
+          }
+      };
+
+      const handleMouseMove = (e) => {
+          if (!seriesRef.current) return;
+          const rect = container.getBoundingClientRect();
+          const y = e.clientY - rect.top;
+          
+          const currentDraggingLine = draggingLineRef.current;
+
+          if (currentDraggingLine) {
+              container.style.cursor = 'ns-resize';
+              const newPrice = seriesRef.current.coordinateToPrice(y);
+              if (newPrice !== null) {
+                  // Update line visually
+                  currentDraggingLine.line.applyOptions({ price: newPrice });
+                  currentDraggingLine.price = newPrice; 
+              }
+          } else {
+              // Hover effect
+              let hovering = false;
+              priceLinesRef.current.forEach(item => {
+                  if (!item.draggableInfo) return;
+                  const lineY = seriesRef.current.priceToCoordinate(item.price);
+                  if (lineY !== null && Math.abs(y - lineY) < 10) {
+                      hovering = true;
+                  }
+              });
+              container.style.cursor = hovering ? 'ns-resize' : 'default';
+          }
+      };
+
+      const handleMouseUp = async () => {
+          const currentDraggingLine = draggingLineRef.current;
+          if (currentDraggingLine) {
+              // Commit change
+              const { type, positionId } = currentDraggingLine.draggableInfo;
+              const newPrice = currentDraggingLine.price;
+              
+              try {
+                  const payload = {};
+                  if (type === 'TP') payload.take_profit_price = newPrice;
+                  if (type === 'SL') payload.stop_loss_price = newPrice;
+                  
+                  await fetch(`/api/positions/${positionId}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(payload)
+                  });
+                  console.log(`Updated ${type} for position ${positionId} to ${newPrice}`);
+              } catch (err) {
+                  console.error("Failed to update position", err);
+              }
+
+              draggingLineRef.current = null;
+              setDraggingLine(null);
+              
+              // Re-enable chart interactions
+              if (chartRef.current) {
+                  chartRef.current.applyOptions({ handleScroll: true, handleScale: true });
+              }
+              // Refresh data
+              updateOverlayData();
+          }
+      };
+
+      container.addEventListener('mousedown', handleMouseDown);
+      container.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+
+      return () => {
+          container.removeEventListener('mousedown', handleMouseDown);
+          container.removeEventListener('mousemove', handleMouseMove);
+          window.removeEventListener('mouseup', handleMouseUp);
+      };
+  }, [updateOverlayData]); // Only re-bind if updateOverlayData changes (which depends on user/symbol)
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -116,6 +253,8 @@ export default function Chart() {
         secondsVisible: false,
       },
     });
+    
+    chartRef.current = chart;
 
     const newSeries = chart.addSeries(CandlestickSeries, {
       upColor: '#26a69a',
@@ -156,7 +295,9 @@ export default function Chart() {
         }));
 
         cdata.sort((a, b) => a.time - b.time);
-        newSeries.setData(cdata);
+        if (seriesRef.current) {
+            newSeries.setData(cdata);
+        }
 
         // Initial overlay update
         updateOverlayData();
@@ -181,7 +322,9 @@ export default function Chart() {
             low: parseFloat(kline.l),
             close: parseFloat(kline.c),
           };
-          newSeries.update(candle);
+          if (seriesRef.current) {
+              newSeries.update(candle);
+          }
         };
 
         ws.onerror = (err) => {
@@ -210,8 +353,11 @@ export default function Chart() {
       window.removeEventListener('resize', handleResize);
       clearInterval(overlayInterval);
       if (ws) ws.close();
-      chart.remove();
+      
+      // Clean up chart
       seriesRef.current = null;
+      chartRef.current = null;
+      chart.remove();
     };
   }, [symbol, timeframe, user, updateOverlayData]); // Re-run if user changes
 
@@ -250,7 +396,7 @@ export default function Chart() {
 
       <div 
         ref={chartContainerRef} 
-        style={{ height: '600px', width: '100%', backgroundColor: '#eee' }}
+        style={{ height: '600px', width: '100%', backgroundColor: '#eee', cursor: draggingLine ? 'ns-resize' : 'default' }}
         className="border rounded-lg shadow-md relative"
       />
     </div>
