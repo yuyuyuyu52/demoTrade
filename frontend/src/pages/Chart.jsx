@@ -427,8 +427,8 @@ export default function Chart() {
         background: { type: ColorType.Solid, color: 'white' },
         textColor: 'black',
       },
-      width: chartContainerRef.current.clientWidth || 800,
-      height: 600,
+      width: chartContainerRef.current.clientWidth,
+      height: chartContainerRef.current.clientHeight,
       grid: {
         vertLines: { color: '#f0f3fa' },
         horzLines: { color: '#f0f3fa' },
@@ -567,7 +567,10 @@ export default function Chart() {
 
     const handleResize = () => {
         if (chartContainerRef.current) {
-            chart.applyOptions({ width: chartContainerRef.current.clientWidth });
+            chart.applyOptions({ 
+                width: chartContainerRef.current.clientWidth,
+                height: chartContainerRef.current.clientHeight
+            });
         }
     };
     window.addEventListener('resize', handleResize);
@@ -606,8 +609,8 @@ export default function Chart() {
   }, [symbol, timeframe, user, updateOverlayData]); // Re-run if user changes
 
   return (
-    <div className="p-6">
-      <div className="mb-4 flex gap-4">
+    <div className="flex flex-col h-[calc(100vh-64px)] p-4">
+      <div className="mb-4 flex gap-4 flex-shrink-0">
         <select 
           value={symbol} 
           onChange={(e) => setSymbol(e.target.value)}
@@ -648,12 +651,12 @@ export default function Chart() {
       </div>
       
       {error && (
-        <div className="mb-4 p-4 bg-red-100 text-red-700 rounded">
+        <div className="mb-4 p-4 bg-red-100 text-red-700 rounded flex-shrink-0">
             Error: {error}. Please check your connection or try a different symbol.
         </div>
       )}
 
-      <div className="relative border rounded-lg shadow-md" style={{ height: '600px', width: '100%' }}>
+      <div className="flex-grow relative border rounded-lg shadow-md overflow-hidden">
         <div 
             ref={chartContainerRef} 
             style={{ height: '100%', width: '100%', backgroundColor: '#eee', cursor: draggingLine ? 'ns-resize' : 'default' }}
