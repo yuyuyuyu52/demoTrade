@@ -7,7 +7,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const API_URL = 'http://127.0.0.1:8000';
+  const API_URL = '';
 
   const login = async (userId) => {
     try {

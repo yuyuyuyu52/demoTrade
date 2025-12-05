@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import { TrendingUp, TrendingDown, Activity, Percent, DollarSign, BarChart2 } from 'lucide-react';
 
-const API_URL = 'http://127.0.0.1:8000';
+const API_URL = '';
 
 const StatCard = ({ title, value, subtext, icon: Icon, color }) => (
   <div className="bg-white p-6 rounded-lg shadow-md border border-gray-100">
