@@ -8,9 +8,13 @@ export default function Chart() {
   const seriesRef = useRef(null);
   const priceLinesRef = useRef([]);
   const chartRef = useRef(null);
+  const lastPriceRef = useRef(null);
+  const crosshairPriceRef = useRef(null);
+  const draggingLineRef = useRef(null);
   
   const [symbol, setSymbol] = useState('BTCUSDT');
   const [timeframe, setTimeframe] = useState('1h');
+  const [quantity, setQuantity] = useState(0.01);
   const [error, setError] = useState(null);
   const [draggingLine, setDraggingLine] = useState(null);
 
@@ -49,7 +53,7 @@ export default function Chart() {
 
   // Fetch Account & Orders Data
   const updateOverlayData = useCallback(async () => {
-    if (!user || draggingLineRef.current) return; // Don't update if dragging
+    if (!user || (draggingLineRef.current)) return; // Don't update if dragging
     
     try {
       // 1. Fetch Account (Positions)
@@ -108,9 +112,82 @@ export default function Chart() {
     }
   }, [user, symbol]);
 
-  const draggingLineRef = useRef(null);
+  // Keyboard Shortcuts for Trading
+  useEffect(() => {
+    const placeOrder = async (side, type) => {
+        if (!user) {
+            alert("Please login first");
+            return;
+        }
+        
+        let price = lastPriceRef.current;
+        if (type === 'LIMIT') {
+            if (crosshairPriceRef.current) {
+                price = crosshairPriceRef.current;
+            }
+        }
 
-  // ... existing code ...
+        if (!price) {
+            alert("Price data not available yet");
+            return;
+        }
+
+        try {
+            const payload = {
+                account_id: user.id,
+                symbol: symbol,
+                side: side,
+                order_type: type,
+                quantity: parseFloat(quantity),
+                price: type === 'LIMIT' ? price : null,
+                leverage: 20 // Default leverage
+            };
+            
+            const res = await fetch('/api/orders/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            
+            if (res.ok) {
+                console.log(`${type} ${side} order placed successfully`);
+                updateOverlayData(); // Refresh lines
+            } else {
+                const err = await res.json();
+                alert(`Order failed: ${err.detail}`);
+            }
+        } catch (e) {
+            console.error("Order error", e);
+            alert("Failed to place order");
+        }
+    };
+
+    const handleKeyDown = (e) => {
+        // Shift + B -> Market Buy
+        if (e.shiftKey && e.code === 'KeyB' && !e.altKey && !e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            placeOrder('BUY', 'MARKET');
+        }
+        // Opt + Shift + B -> Limit Buy
+        if (e.shiftKey && e.code === 'KeyB' && e.altKey) {
+            e.preventDefault();
+            placeOrder('BUY', 'LIMIT');
+        }
+        // Shift + S -> Market Sell
+        if (e.shiftKey && e.code === 'KeyS' && !e.altKey && !e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            placeOrder('SELL', 'MARKET');
+        }
+        // Opt + Shift + S -> Limit Sell
+        if (e.shiftKey && e.code === 'KeyS' && e.altKey) {
+            e.preventDefault();
+            placeOrder('SELL', 'LIMIT');
+        }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [user, symbol, quantity, updateOverlayData]);
 
   // Handle Dragging Logic (Separate Effect for Event Listeners using Refs)
   useEffect(() => {
@@ -266,6 +343,16 @@ export default function Chart() {
     
     seriesRef.current = newSeries;
 
+    // Subscribe to crosshair move to capture mouse price
+    chart.subscribeCrosshairMove((param) => {
+        if (param.point && seriesRef.current) {
+            const price = seriesRef.current.coordinateToPrice(param.point.y);
+            crosshairPriceRef.current = price;
+        } else {
+            crosshairPriceRef.current = null;
+        }
+    });
+
     let ws = null;
 
     const fetchData = async () => {
@@ -297,6 +384,9 @@ export default function Chart() {
         cdata.sort((a, b) => a.time - b.time);
         if (seriesRef.current) {
             newSeries.setData(cdata);
+        }
+        if (cdata.length > 0) {
+            lastPriceRef.current = cdata[cdata.length - 1].close;
         }
 
         // Initial overlay update
@@ -336,6 +426,8 @@ export default function Chart() {
               low: low,
               close: close,
             };
+            
+            lastPriceRef.current = close;
             
             if (seriesRef.current) {
                 newSeries.update(candle);
@@ -404,6 +496,17 @@ export default function Chart() {
           <option value="4h">4 Hours</option>
           <option value="1d">1 Day</option>
         </select>
+
+        <div className="flex items-center gap-2 ml-4">
+            <span className="text-sm font-medium text-gray-700">Qty:</span>
+            <input 
+                type="number" 
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                className="p-2 border rounded shadow-sm w-24"
+                step="0.001"
+            />
+        </div>
       </div>
       
       {error && (
