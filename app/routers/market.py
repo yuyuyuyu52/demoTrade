@@ -10,7 +10,8 @@ async def get_prices():
 
 @router.get("/klines")
 async def get_klines(symbol: str, interval: str, limit: int = 1000):
-    url = "https://api.binance.com/api/v3/klines"
+    # Use Binance Futures API
+    url = "https://fapi.binance.com/fapi/v1/klines"
     params = {
         "symbol": symbol,
         "interval": interval,

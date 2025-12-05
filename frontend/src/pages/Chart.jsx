@@ -304,7 +304,8 @@ export default function Chart() {
 
         // WebSocket
         const wsSymbol = symbol.toLowerCase();
-        const wsUrl = `wss://stream.binance.com:9443/ws/${wsSymbol}@kline_${timeframe}`;
+        // Use Binance Futures WebSocket
+        const wsUrl = `wss://fstream.binance.com/ws/${wsSymbol}@kline_${timeframe}`;
         
         ws = new WebSocket(wsUrl);
 
@@ -313,17 +314,34 @@ export default function Chart() {
         };
 
         ws.onmessage = (event) => {
-          const message = JSON.parse(event.data);
-          const kline = message.k;
-          const candle = {
-            time: kline.t / 1000,
-            open: parseFloat(kline.o),
-            high: parseFloat(kline.h),
-            low: parseFloat(kline.l),
-            close: parseFloat(kline.c),
-          };
-          if (seriesRef.current) {
-              newSeries.update(candle);
+          try {
+            const message = JSON.parse(event.data);
+            if (!message.k) return;
+            
+            const kline = message.k;
+            const open = parseFloat(kline.o);
+            const high = parseFloat(kline.h);
+            const low = parseFloat(kline.l);
+            const close = parseFloat(kline.c);
+
+            // Filter out invalid prices (0 or NaN) which can happen with fstream
+            if (!open || !high || !low || !close || open <= 0 || high <= 0 || low <= 0 || close <= 0) {
+                return;
+            }
+
+            const candle = {
+              time: kline.t / 1000,
+              open: open,
+              high: high,
+              low: low,
+              close: close,
+            };
+            
+            if (seriesRef.current) {
+                newSeries.update(candle);
+            }
+          } catch (e) {
+            console.error("WS Message Error:", e);
           }
         };
 
