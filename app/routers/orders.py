@@ -60,3 +60,17 @@ async def list_orders(account_id: int, db: AsyncSession = Depends(get_db)):
     stmt = select(Order).where(Order.account_id == account_id)
     result = await db.execute(stmt)
     return result.scalars().all()
+
+@router.delete("/{order_id}", response_model=OrderResponse)
+async def cancel_order(order_id: int, db: AsyncSession = Depends(get_db)):
+    order = await db.get(Order, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    if order.status != OrderStatus.NEW:
+        raise HTTPException(status_code=400, detail="Order cannot be cancelled")
+
+    order.status = OrderStatus.CANCELED
+    await db.commit()
+    await db.refresh(order)
+    return order

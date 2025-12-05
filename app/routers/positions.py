@@ -14,10 +14,12 @@ async def update_position(position_id: int, position_in: PositionUpdate, db: Asy
     if not position:
         raise HTTPException(status_code=404, detail="Position not found")
 
-    if position_in.take_profit_price is not None:
-        position.take_profit_price = position_in.take_profit_price
-    if position_in.stop_loss_price is not None:
-        position.stop_loss_price = position_in.stop_loss_price
+    update_data = position_in.model_dump(exclude_unset=True)
+    
+    if "take_profit_price" in update_data:
+        position.take_profit_price = update_data["take_profit_price"]
+    if "stop_loss_price" in update_data:
+        position.stop_loss_price = update_data["stop_loss_price"]
 
     await db.commit()
     await db.refresh(position)

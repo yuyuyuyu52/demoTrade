@@ -136,6 +136,78 @@ export default function Chart() {
         textSpan.innerHTML = title;
         labelElement.appendChild(textSpan);
 
+        // Add Close/Cancel Button (X)
+        if (draggableInfo) {
+            const closeBtn = document.createElement('button');
+            closeBtn.innerText = '×';
+            closeBtn.style.pointerEvents = 'auto';
+            closeBtn.style.cursor = 'pointer';
+            closeBtn.style.border = 'none';
+            closeBtn.style.borderRadius = '2px';
+            closeBtn.style.padding = '0px 4px';
+            closeBtn.style.fontSize = '12px';
+            closeBtn.style.fontWeight = 'bold';
+            closeBtn.style.color = 'white';
+            closeBtn.style.backgroundColor = 'rgba(0,0,0,0.2)'; // Semi-transparent
+            closeBtn.style.marginLeft = '4px';
+            closeBtn.style.lineHeight = '1';
+            closeBtn.title = draggableInfo.type === 'POS' ? 'Close Position' : 'Cancel';
+
+            closeBtn.onmouseover = () => { closeBtn.style.backgroundColor = 'rgba(0,0,0,0.5)'; };
+            closeBtn.onmouseout = () => { closeBtn.style.backgroundColor = 'rgba(0,0,0,0.2)'; };
+
+            closeBtn.onclick = async (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                
+                if (!confirm('Are you sure?')) return;
+
+                try {
+                    if (draggableInfo.type === 'POS') {
+                        // Close Position: Send Market Order
+                        const side = draggableInfo.quantity > 0 ? 'SELL' : 'BUY';
+                        const qty = Math.abs(draggableInfo.quantity);
+                        
+                        const payload = {
+                            account_id: user.id,
+                            symbol: symbol,
+                            side: side,
+                            order_type: 'MARKET',
+                            quantity: qty,
+                            leverage: 20 // Should ideally come from position info
+                        };
+                        
+                        await fetch('/api/orders/', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                    } else if (draggableInfo.type === 'ORDER') {
+                        // Cancel Order
+                        await fetch(`/api/orders/${draggableInfo.orderId}`, {
+                            method: 'DELETE'
+                        });
+                    } else if (draggableInfo.type === 'TP' || draggableInfo.type === 'SL') {
+                        // Cancel TP/SL
+                        const payload = {};
+                        if (draggableInfo.type === 'TP') payload.take_profit_price = null;
+                        if (draggableInfo.type === 'SL') payload.stop_loss_price = null;
+                        
+                        await fetch(`/api/positions/${draggableInfo.positionId}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                    }
+                    updateOverlayData();
+                } catch (err) {
+                    console.error("Failed to action", err);
+                    alert("Action failed");
+                }
+            };
+            labelElement.appendChild(closeBtn);
+        }
+
         labelsContainerRef.current.appendChild(labelElement);
     }
 
@@ -177,7 +249,11 @@ export default function Chart() {
                   pnlHtml = ` <span style="color: ${pnlColor}; font-weight: bold;">${sign}${pnl.toFixed(2)}</span>`;
               }
               
-              addPriceLine(pos.entry_price, `Pos ${pos.quantity}${pnlHtml}`, '#2962FF', LineStyle.Solid, { type: 'POS', positionId: pos.id });
+              addPriceLine(pos.entry_price, `Pos ${pos.quantity}${pnlHtml}`, '#2962FF', LineStyle.Solid, { 
+                  type: 'POS', 
+                  positionId: pos.id, 
+                  quantity: parseFloat(pos.quantity) 
+              });
               
               // SL/TP
               if (pos.stop_loss_price) {
@@ -204,7 +280,7 @@ export default function Chart() {
             if (order.symbol === symbol && order.status === 'NEW') {
                // Limit Order Price
                if (order.limit_price) {
-                   addPriceLine(order.limit_price, `${order.side} ${order.quantity}`, '#FF9800', LineStyle.Dotted);
+                   addPriceLine(order.limit_price, `${order.side} ${order.quantity}`, '#FF9800', LineStyle.Dotted, { type: 'ORDER', orderId: order.id });
                }
             }
           });
@@ -495,7 +571,9 @@ export default function Chart() {
         }));
 
         cdata.sort((a, b) => a.time - b.time);
-        if (seriesRef.current) {
+        
+        // Check if series is still valid before setting data
+        if (seriesRef.current && chartRef.current) {
             newSeries.setData(cdata);
         }
         if (cdata.length > 0) {
@@ -506,14 +584,15 @@ export default function Chart() {
         updateOverlayData();
 
         // WebSocket
-        const wsSymbol = symbol.toLowerCase();
-        // Use Binance Futures WebSocket
-        const wsUrl = `wss://fstream.binance.com/ws/${wsSymbol}@kline_${timeframe}`;
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        // Use local proxy to avoid CORS/Network issues
+        const wsUrl = `${protocol}//${host}/api/market/ws/klines/${symbol}/${timeframe}`;
         
         ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
-            console.log('Connected to Binance WS');
+            console.log('Connected to WS Proxy');
         };
 
         ws.onmessage = (event) => {
@@ -542,7 +621,8 @@ export default function Chart() {
             
             lastPriceRef.current = close;
             
-            if (seriesRef.current) {
+            // Check validity before update
+            if (seriesRef.current && chartRef.current) {
                 newSeries.update(candle);
             }
           } catch (e) {
@@ -577,16 +657,28 @@ export default function Chart() {
 
     // Sync labels loop
     let animationFrameId;
+    let isDisposed = false; // Flag to track disposal
+
     const syncLabels = () => {
+        if (isDisposed) return; // Stop if disposed
+
         if (seriesRef.current && priceLinesRef.current.length > 0) {
             priceLinesRef.current.forEach(item => {
                 if (item.labelElement) {
-                    const y = seriesRef.current.priceToCoordinate(item.price);
-                    if (y === null) {
-                        item.labelElement.style.display = 'none';
-                    } else {
-                        item.labelElement.style.display = 'block';
-                        item.labelElement.style.top = `${y}px`;
+                    // Check if series is still valid before accessing
+                    try {
+                        // Double check chart existence
+                        if (!chartRef.current) return;
+                        
+                        const y = seriesRef.current.priceToCoordinate(item.price);
+                        if (y === null) {
+                            item.labelElement.style.display = 'none';
+                        } else {
+                            item.labelElement.style.display = 'flex'; // Changed to flex for buttons
+                            item.labelElement.style.top = `${y}px`;
+                        }
+                    } catch (e) {
+                        // Series might be disposed
                     }
                 }
             });
@@ -596,15 +688,33 @@ export default function Chart() {
     syncLabels();
 
     return () => {
+      isDisposed = true; // Mark as disposed
       window.removeEventListener('resize', handleResize);
       cancelAnimationFrame(animationFrameId);
       clearInterval(overlayInterval);
       if (ws) ws.close();
       
       // Clean up chart
+      // Important: Remove series first, then chart
+      try {
+          if (seriesRef.current && chartRef.current) {
+             // No need to remove series explicitly if removing chart, but good practice
+             // chartRef.current.removeSeries(seriesRef.current);
+          }
+          if (chartRef.current) {
+              chartRef.current.remove();
+          }
+      } catch (e) {
+          console.error("Error removing chart", e);
+      }
+      
       seriesRef.current = null;
       chartRef.current = null;
-      chart.remove();
+      
+      // Clear labels
+      if (labelsContainerRef.current) {
+          labelsContainerRef.current.innerHTML = '';
+      }
     };
   }, [symbol, timeframe, user, updateOverlayData]); // Re-run if user changes
 

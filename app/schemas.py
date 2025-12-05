@@ -61,6 +61,7 @@ class PositionUpdate(BaseModel):
     stop_loss_price: Optional[float] = None
 
 class PositionHistoryResponse(BaseModel):
+    id: int
     symbol: str
     side: str
     entry_price: float
