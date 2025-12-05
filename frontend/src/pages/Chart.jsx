@@ -485,17 +485,21 @@ export default function Chart() {
           <option value="SOLUSDT">SOL/USDT</option>
         </select>
         
-        <select 
-          value={timeframe} 
-          onChange={(e) => setTimeframe(e.target.value)}
-          className="p-2 border rounded shadow-sm"
-        >
-          <option value="1m">1 Minute</option>
-          <option value="15m">15 Minutes</option>
-          <option value="1h">1 Hour</option>
-          <option value="4h">4 Hours</option>
-          <option value="1d">1 Day</option>
-        </select>
+        <div className="flex border rounded shadow-sm overflow-hidden">
+          {['1m', '15m', '1h', '4h', '1d'].map((tf) => (
+            <button
+              key={tf}
+              onClick={() => setTimeframe(tf)}
+              className={`px-3 py-2 text-sm font-medium transition-colors ${
+                timeframe === tf
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              {tf}
+            </button>
+          ))}
+        </div>
 
         <div className="flex items-center gap-2 ml-4">
             <span className="text-sm font-medium text-gray-700">Qty:</span>
