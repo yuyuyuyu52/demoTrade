@@ -48,13 +48,14 @@ async def get_account(account_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Account not found")
     return await calculate_account_metrics(account)
 @router.get("/{account_id}/equity-history", response_model=list[EquityHistoryResponse])
-async def get_equity_history(account_id: int, db: AsyncSession = Depends(get_db)):
-    # Filter for last 12 hours
-    since = datetime.utcnow() - timedelta(hours=12)
-    stmt = select(EquityHistory).where(
-        EquityHistory.account_id == account_id,
-        EquityHistory.timestamp >= since
-    ).order_by(EquityHistory.timestamp.asc())
+async def get_equity_history(account_id: int, hours: int = None, db: AsyncSession = Depends(get_db)):
+    stmt = select(EquityHistory).where(EquityHistory.account_id == account_id)
+    
+    if hours:
+        since = datetime.utcnow() - timedelta(hours=hours)
+        stmt = stmt.where(EquityHistory.timestamp >= since)
+        
+    stmt = stmt.order_by(EquityHistory.timestamp.asc())
     result = await db.execute(stmt)
     return result.scalars().all()
 
