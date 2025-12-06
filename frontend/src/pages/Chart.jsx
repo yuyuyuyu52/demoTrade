@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { createChart, ColorType, CandlestickSeries, LineStyle } from 'lightweight-charts';
+import { createChart, ColorType, CandlestickSeries, LineStyle, CrosshairMode } from 'lightweight-charts';
 import { useAuth } from '../context/AuthContext';
 
 export default function Chart() {
@@ -528,8 +528,9 @@ export default function Chart() {
         horzLines: { color: '#f0f3fa' },
       },
       crosshair: {
+        mode: CrosshairMode.Normal,
         horzLine: {
-            labelVisible: false,
+            labelVisible: true,
         },
       },
       timeScale: {

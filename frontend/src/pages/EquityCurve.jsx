@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { createChart, ColorType, AreaSeries } from 'lightweight-charts';
+import { createChart, ColorType, AreaSeries, CrosshairMode } from 'lightweight-charts';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 
@@ -29,6 +29,9 @@ export default function EquityCurve() {
         vertLines: { color: '#f0f3fa' },
         horzLines: { color: '#f0f3fa' },
       },
+      crosshair: {
+        mode: CrosshairMode.Normal,
+      },
       timeScale: {
         timeVisible: true,
         secondsVisible: true,
@@ -39,6 +42,7 @@ export default function EquityCurve() {
       lineColor: '#2962FF',
       topColor: '#2962FF',
       bottomColor: 'rgba(41, 98, 255, 0.28)',
+      crosshairMarkerVisible: false,
     });
 
     chartRef.current = chart;
