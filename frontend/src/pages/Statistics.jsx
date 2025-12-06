@@ -116,6 +116,15 @@ export default function Statistics() {
           color="text-purple-500"
         />
 
+        {/* Reward to Risk (R-Multiple) */}
+        <StatCard 
+          title="Avg R-Multiple" 
+          value={stats.reward_to_risk_ratio.toFixed(2)}
+          subtext="Avg Win / Avg Loss"
+          icon={Activity}
+          color="text-orange-500"
+        />
+
         {/* Expectancy */}
         <StatCard 
           title="Expectancy" 
@@ -132,6 +141,15 @@ export default function Statistics() {
           subtext={`${stats.total_trades} Total Trades`}
           icon={Percent}
           color="text-indigo-500"
+        />
+
+        {/* Win/Loss Streak */}
+        <StatCard 
+          title="Max Streak" 
+          value={`W: ${stats.max_win_streak} / L: ${stats.max_loss_streak}`}
+          subtext="Consecutive Wins / Losses"
+          icon={TrendingUp}
+          color="text-teal-500"
         />
 
         {/* CAGR */}

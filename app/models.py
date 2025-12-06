@@ -62,6 +62,7 @@ class PositionHistory(Base):
     leverage: Mapped[int] = mapped_column(Integer)
     realized_pnl: Mapped[float] = mapped_column(Float)
     total_fee: Mapped[float] = mapped_column(Float, default=0.0)
+    initial_stop_loss_price: Mapped[float] = mapped_column(Float, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True)) # When position was opened
     closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now()) # When position was closed
@@ -84,6 +85,7 @@ class Position(Base):
     
     take_profit_price: Mapped[float] = mapped_column(Float, nullable=True)
     stop_loss_price: Mapped[float] = mapped_column(Float, nullable=True)
+    initial_stop_loss_price: Mapped[float] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())

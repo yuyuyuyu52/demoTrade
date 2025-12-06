@@ -101,12 +101,15 @@ class AccountStatistics(BaseModel):
     profit_factor: float
     long_profit_factor: float
     short_profit_factor: float
+    reward_to_risk_ratio: float
     sharpe_ratio: float
     cagr: float
     win_rate: float
     total_trades: int
     average_win: float
     average_loss: float
+    max_win_streak: int
+    max_loss_streak: int
 
     class Config:
         from_attributes = True

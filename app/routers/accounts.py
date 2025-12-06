@@ -187,6 +187,30 @@ async def get_account_statistics(account_id: int, days: float = None, db: AsyncS
     loss_rate = 1.0 - win_rate
     expectancy = (win_rate * avg_win) + (loss_rate * avg_loss)
 
+    # Avg R-Multiple
+    # R = Realized PNL / Initial Risk
+    # Initial Risk = abs(Entry - Initial SL) * Quantity
+    # Note: We need to calculate R for each trade and then average them
+    r_multiples = []
+    for t in trades:
+        if t.initial_stop_loss_price:
+            risk_per_unit = abs(t.entry_price - t.initial_stop_loss_price)
+            if risk_per_unit > 0:
+                total_risk = risk_per_unit * t.quantity
+                if total_risk > 0:
+                    net_pnl = t.realized_pnl - t.total_fee
+                    r = net_pnl / total_risk
+                    r_multiples.append(r)
+    
+    if r_multiples:
+        reward_to_risk_ratio = statistics.mean(r_multiples)
+    else:
+        # Fallback to Avg Win / Avg Loss if no SL data
+        if abs(avg_loss) > 0:
+            reward_to_risk_ratio = avg_win / abs(avg_loss)
+        else:
+            reward_to_risk_ratio = 0.0
+
     # 2. Equity Statistics (Drawdown, Sharpe, CAGR)
     max_drawdown = 0.0
     max_drawdown_pct = 0.0
@@ -254,6 +278,29 @@ async def get_account_statistics(account_id: int, days: float = None, db: AsyncS
             except:
                 cagr = 0.0
     
+    # Win/Loss Streak
+    max_win_streak = 0
+    max_loss_streak = 0
+    current_win_streak = 0
+    current_loss_streak = 0
+    
+    for pnl in net_pnls:
+        if pnl > 0:
+            current_win_streak += 1
+            current_loss_streak = 0
+            if current_win_streak > max_win_streak:
+                max_win_streak = current_win_streak
+        elif pnl < 0:
+            current_loss_streak += 1
+            current_win_streak = 0
+            if current_loss_streak > max_loss_streak:
+                max_loss_streak = current_loss_streak
+        else:
+            # Break even resets both? Or treat as neutral? 
+            # Usually break even resets streaks
+            current_win_streak = 0
+            current_loss_streak = 0
+
     return AccountStatistics(
         max_drawdown=max_drawdown,
         max_drawdown_pct=max_drawdown_pct,
@@ -261,12 +308,15 @@ async def get_account_statistics(account_id: int, days: float = None, db: AsyncS
         profit_factor=profit_factor,
         long_profit_factor=long_profit_factor,
         short_profit_factor=short_profit_factor,
+        reward_to_risk_ratio=reward_to_risk_ratio,
         sharpe_ratio=sharpe_ratio,
         cagr=cagr,
         win_rate=win_rate,
         total_trades=total_trades,
         average_win=avg_win,
-        average_loss=avg_loss
+        average_loss=avg_loss,
+        max_win_streak=max_win_streak,
+        max_loss_streak=max_loss_streak
     )
 
 @router.patch("/{account_id}", response_model=AccountResponse)

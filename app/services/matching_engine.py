@@ -161,7 +161,8 @@ class MatchingEngine:
                 margin=float(margin_required),
                 accumulated_fees=float(d_fee),
                 take_profit_price=take_profit_price,
-                stop_loss_price=stop_loss_price
+                stop_loss_price=stop_loss_price,
+                initial_stop_loss_price=stop_loss_price
             )
             session.add(position)
         else:
@@ -225,6 +226,7 @@ class MatchingEngine:
                             leverage=position.leverage,
                             realized_pnl=position.realized_pnl,
                             total_fee=position.accumulated_fees,
+                            initial_stop_loss_price=position.initial_stop_loss_price,
                             created_at=position.created_at
                         )
                         session.add(history)
@@ -244,7 +246,8 @@ class MatchingEngine:
                             margin=float(margin_required),
                             accumulated_fees=0.0,
                             take_profit_price=take_profit_price,
-                            stop_loss_price=stop_loss_price
+                            stop_loss_price=stop_loss_price,
+                            initial_stop_loss_price=stop_loss_price
                         )
                         session.add(new_pos)
             
@@ -294,6 +297,7 @@ class MatchingEngine:
                             leverage=position.leverage,
                             realized_pnl=position.realized_pnl,
                             total_fee=position.accumulated_fees,
+                            initial_stop_loss_price=position.initial_stop_loss_price,
                             created_at=position.created_at
                         )
                         session.add(history)
@@ -316,7 +320,7 @@ class MatchingEngine:
                             stop_loss_price=stop_loss_price
                         )
                         session.add(new_pos)
-                        
+
         account.balance = float(d_balance)
 
     async def update_account_and_position(self, session: AsyncSession, account_id: int, symbol: str, side: OrderSide, price: float, quantity: float, leverage: int = 1, fee: float = 0.0, take_profit_price: float = None, stop_loss_price: float = None):
@@ -437,6 +441,7 @@ class MatchingEngine:
                             leverage=position.leverage,
                             realized_pnl=position.realized_pnl,
                             total_fee=position.accumulated_fees,
+                            initial_stop_loss_price=position.initial_stop_loss_price,
                             created_at=position.created_at
                         )
                         session.add(history)
@@ -474,7 +479,8 @@ class MatchingEngine:
                             margin=margin_required,
                             accumulated_fees=0.0,
                             take_profit_price=take_profit_price,
-                            stop_loss_price=stop_loss_price
+                            stop_loss_price=stop_loss_price,
+                            initial_stop_loss_price=stop_loss_price
                         )
                         session.add(new_pos)
 
@@ -522,6 +528,7 @@ class MatchingEngine:
                             leverage=position.leverage,
                             realized_pnl=position.realized_pnl,
                             total_fee=position.accumulated_fees,
+                            initial_stop_loss_price=position.initial_stop_loss_price,
                             created_at=position.created_at
                         )
                         session.add(history)
