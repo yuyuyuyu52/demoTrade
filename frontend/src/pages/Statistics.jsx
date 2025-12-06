@@ -97,7 +97,12 @@ export default function Statistics() {
         <StatCard 
           title="Profit Factor" 
           value={stats.profit_factor.toFixed(2)}
-          subtext={stats.profit_factor > 1.5 ? "Excellent" : stats.profit_factor > 1 ? "Profitable" : "Unprofitable"}
+          subtext={
+            <span className="flex gap-2 text-xs">
+              <span>L: {stats.long_profit_factor.toFixed(2)}</span>
+              <span>S: {stats.short_profit_factor.toFixed(2)}</span>
+            </span>
+          }
           icon={BarChart2}
           color="text-blue-500"
         />

@@ -99,6 +99,8 @@ class AccountStatistics(BaseModel):
     max_drawdown_pct: float
     expectancy: float
     profit_factor: float
+    long_profit_factor: float
+    short_profit_factor: float
     sharpe_ratio: float
     cagr: float
     win_rate: float

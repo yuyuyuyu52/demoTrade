@@ -137,22 +137,52 @@ async def get_account_statistics(account_id: int, days: float = None, db: AsyncS
     
     # 1. Trade Statistics
     total_trades = len(trades)
-    wins = [t for t in trades if t.realized_pnl > 0]
-    losses = [t for t in trades if t.realized_pnl <= 0]
+    
+    # Calculate Net PNL (Realized PNL - Fees)
+    net_pnls = [(t.realized_pnl - t.total_fee) for t in trades]
+    
+    wins = [pnl for pnl in net_pnls if pnl > 0]
+    losses = [pnl for pnl in net_pnls if pnl <= 0]
     
     win_rate = len(wins) / total_trades if total_trades > 0 else 0.0
     
-    avg_win = statistics.mean([t.realized_pnl for t in wins]) if wins else 0.0
-    avg_loss = statistics.mean([t.realized_pnl for t in losses]) if losses else 0.0
+    avg_win = statistics.mean(wins) if wins else 0.0
+    avg_loss = statistics.mean(losses) if losses else 0.0
     
-    gross_profit = sum([t.realized_pnl for t in wins])
-    gross_loss = abs(sum([t.realized_pnl for t in losses]))
+    gross_profit = sum(wins)
+    gross_loss = abs(sum(losses))
     
     if gross_loss > 0:
         profit_factor = gross_profit / gross_loss
     else:
         profit_factor = 0.0 # Avoid infinite value for JSON serialization
     
+    # Long Profit Factor
+    long_trades = [t for t in trades if t.side == 'LONG']
+    long_net_pnls = [(t.realized_pnl - t.total_fee) for t in long_trades]
+    long_wins = [pnl for pnl in long_net_pnls if pnl > 0]
+    long_losses = [pnl for pnl in long_net_pnls if pnl <= 0]
+    long_gross_profit = sum(long_wins)
+    long_gross_loss = abs(sum(long_losses))
+    
+    if long_gross_loss > 0:
+        long_profit_factor = long_gross_profit / long_gross_loss
+    else:
+        long_profit_factor = 0.0
+
+    # Short Profit Factor
+    short_trades = [t for t in trades if t.side == 'SHORT']
+    short_net_pnls = [(t.realized_pnl - t.total_fee) for t in short_trades]
+    short_wins = [pnl for pnl in short_net_pnls if pnl > 0]
+    short_losses = [pnl for pnl in short_net_pnls if pnl <= 0]
+    short_gross_profit = sum(short_wins)
+    short_gross_loss = abs(sum(short_losses))
+    
+    if short_gross_loss > 0:
+        short_profit_factor = short_gross_profit / short_gross_loss
+    else:
+        short_profit_factor = 0.0
+
     # Expectancy = (Win Rate * Avg Win) + (Loss Rate * Avg Loss)  <-- Avg Loss is usually negative
     loss_rate = 1.0 - win_rate
     expectancy = (win_rate * avg_win) + (loss_rate * avg_loss)
@@ -229,6 +259,8 @@ async def get_account_statistics(account_id: int, days: float = None, db: AsyncS
         max_drawdown_pct=max_drawdown_pct,
         expectancy=expectancy,
         profit_factor=profit_factor,
+        long_profit_factor=long_profit_factor,
+        short_profit_factor=short_profit_factor,
         sharpe_ratio=sharpe_ratio,
         cagr=cagr,
         win_rate=win_rate,
