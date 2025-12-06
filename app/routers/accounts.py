@@ -101,14 +101,27 @@ async def get_daily_pnl(account_id: int, year: int, month: int, db: AsyncSession
     return data
 
 @router.get("/{account_id}/statistics", response_model=AccountStatistics)
-async def get_account_statistics(account_id: int, db: AsyncSession = Depends(get_db)):
+async def get_account_statistics(account_id: int, days: float = None, db: AsyncSession = Depends(get_db)):
+    # Calculate start date if days provided
+    start_date = None
+    if days:
+        start_date = datetime.utcnow() - timedelta(days=days)
+
     # Fetch Position History
-    stmt = select(PositionHistory).where(PositionHistory.account_id == account_id).order_by(PositionHistory.closed_at.asc())
+    stmt = select(PositionHistory).where(PositionHistory.account_id == account_id)
+    if start_date:
+        stmt = stmt.where(PositionHistory.closed_at >= start_date)
+    stmt = stmt.order_by(PositionHistory.closed_at.asc())
+    
     result = await db.execute(stmt)
     trades = result.scalars().all()
 
     # Fetch Equity History
-    stmt = select(EquityHistory).where(EquityHistory.account_id == account_id).order_by(EquityHistory.timestamp.asc())
+    stmt = select(EquityHistory).where(EquityHistory.account_id == account_id)
+    if start_date:
+        stmt = stmt.where(EquityHistory.timestamp >= start_date)
+    stmt = stmt.order_by(EquityHistory.timestamp.asc())
+    
     result = await db.execute(stmt)
     equity_curve = result.scalars().all()
 

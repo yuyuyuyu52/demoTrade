@@ -24,16 +24,30 @@ export default function Statistics() {
   const { user } = useAuth();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [timeRange, setTimeRange] = useState('ALL');
+
+  const ranges = [
+    { label: '全部', value: 'ALL', days: null },
+    { label: '一年', value: '1Y', days: 365 },
+    { label: '半年', value: '6M', days: 180 },
+    { label: '三月', value: '3M', days: 90 },
+    { label: '一月', value: '1M', days: 30 },
+    { label: '一周', value: '1W', days: 7 },
+    { label: '一日', value: '1D', days: 1 },
+  ];
 
   useEffect(() => {
     if (user) {
       fetchStats();
     }
-  }, [user]);
+  }, [user, timeRange]);
 
   const fetchStats = async () => {
+    setLoading(true);
     try {
-      const res = await axios.get(`${API_URL}/accounts/${user.id}/statistics`);
+      const selectedRange = ranges.find(r => r.value === timeRange);
+      const params = selectedRange && selectedRange.days ? { days: selectedRange.days } : {};
+      const res = await axios.get(`${API_URL}/accounts/${user.id}/statistics`, { params });
       setStats(res.data);
     } catch (error) {
       console.error("Failed to fetch statistics", error);
@@ -42,13 +56,33 @@ export default function Statistics() {
     }
   };
 
-  if (loading) return <div className="p-8 text-center">Loading statistics...</div>;
-  if (!stats) return <div className="p-8 text-center">No statistics available.</div>;
+  if (loading && !stats) return <div className="p-8 text-center">Loading statistics...</div>;
+  if (!stats && !loading) return <div className="p-8 text-center">No statistics available.</div>;
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6 text-gray-800">Trading Performance</h1>
+      <div className="flex flex-col md:flex-row justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold text-gray-800 mb-4 md:mb-0">Trading Performance</h1>
+        
+        <div className="flex bg-gray-100 p-1 rounded-lg overflow-x-auto max-w-full">
+          {ranges.map((range) => (
+            <button
+              key={range.value}
+              onClick={() => setTimeRange(range.value)}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
+                timeRange === range.value
+                  ? 'bg-white text-blue-600 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {range.label}
+            </button>
+          ))}
+        </div>
+      </div>
       
+      {loading && <div className="mb-4 text-center text-sm text-gray-500">Updating...</div>}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {/* Max Drawdown */}
         <StatCard 
