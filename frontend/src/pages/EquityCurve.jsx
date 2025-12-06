@@ -80,8 +80,10 @@ export default function EquityCurve() {
   };
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-md h-[600px]">
-      <Line options={options} data={data} />
+    <div className="bg-white p-6 rounded-lg shadow-md h-[calc(100vh-64px)] flex flex-col">
+      <div className="flex-grow relative">
+        <Line options={options} data={data} />
+      </div>
     </div>
   );
 }
