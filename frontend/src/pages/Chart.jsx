@@ -110,7 +110,7 @@ export default function Chart() {
                         const color = type === 'TP' ? '#26a69a' : '#ef5350';
                         // Recursively call addPriceLine to create the line
                         // Note: We pass the same draggableInfo but with the specific type (TP/SL)
-                        addPriceLine(priceVal, type, color, LineStyle.Dashed, { type, positionId: draggableInfo.positionId });
+                        addPriceLine(priceVal, type, color, LineStyle.Solid, { type, positionId: draggableInfo.positionId });
                         
                         // The new line is the last one added
                         targetLine = priceLinesRef.current[priceLinesRef.current.length - 1];
@@ -260,10 +260,10 @@ export default function Chart() {
               
               // SL/TP
               if (pos.stop_loss_price) {
-                  addPriceLine(pos.stop_loss_price, 'SL', '#ef5350', LineStyle.Dashed, { type: 'SL', positionId: pos.id });
+                  addPriceLine(pos.stop_loss_price, 'SL', '#ef5350', LineStyle.Solid, { type: 'SL', positionId: pos.id });
               }
               if (pos.take_profit_price) {
-                  addPriceLine(pos.take_profit_price, 'TP', '#26a69a', LineStyle.Dashed, { type: 'TP', positionId: pos.id });
+                  addPriceLine(pos.take_profit_price, 'TP', '#26a69a', LineStyle.Solid, { type: 'TP', positionId: pos.id });
               }
             }
           });
@@ -283,7 +283,7 @@ export default function Chart() {
             if (order.symbol === symbol && order.status === 'NEW') {
                // Limit Order Price
                if (order.limit_price) {
-                   addPriceLine(order.limit_price, `${order.side} ${order.quantity}`, '#FF9800', LineStyle.Dotted, { type: 'ORDER', orderId: order.id });
+                   addPriceLine(order.limit_price, `${order.side} ${order.quantity}`, '#FF9800', LineStyle.Solid, { type: 'ORDER', orderId: order.id });
                }
             }
           });
@@ -518,14 +518,14 @@ export default function Chart() {
     // Create Chart
     const chart = createChart(chartContainerRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: 'white' },
+        background: { type: ColorType.Solid, color: '#f5f5f5' },
         textColor: 'black',
       },
       width: chartContainerRef.current.clientWidth,
       height: chartContainerRef.current.clientHeight,
       grid: {
-        vertLines: { color: '#f0f3fa' },
-        horzLines: { color: '#f0f3fa' },
+        vertLines: { visible: false },
+        horzLines: { visible: false },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
@@ -542,11 +542,12 @@ export default function Chart() {
     chartRef.current = chart;
 
     const newSeries = chart.addSeries(CandlestickSeries, {
-      upColor: '#26a69a',
-      downColor: '#ef5350',
-      borderVisible: false,
-      wickUpColor: '#26a69a',
-      wickDownColor: '#ef5350',
+      upColor: '#00C853',
+      downColor: '#000000',
+      borderVisible: true,
+      borderColor: '#000000',
+      wickUpColor: '#000000',
+      wickDownColor: '#000000',
     });
     
     seriesRef.current = newSeries;
