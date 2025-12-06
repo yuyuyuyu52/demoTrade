@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, extract
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timedelta
+from typing import Optional
 
 from app.database import get_db
 from app.models import Account, Position, EquityHistory, PositionHistory
@@ -66,20 +67,35 @@ async def get_position_history(account_id: int, db: AsyncSession = Depends(get_d
     return result.scalars().all()
 
 @router.get("/{account_id}/daily-pnl")
-async def get_daily_pnl(account_id: int, year: int, month: int, db: AsyncSession = Depends(get_db)):
+async def get_daily_pnl(
+    account_id: int, 
+    year: Optional[int] = None, 
+    month: Optional[int] = None, 
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
     # Group by day and sum (realized_pnl - total_fee)
-    # Note: SQLite/PostgreSQL date functions might differ. Assuming PostgreSQL or standard SQL.
-    # For asyncpg/PostgreSQL:
     date_expr = func.date_trunc('day', PositionHistory.closed_at)
     
     stmt = select(
         date_expr.label('date'),
         func.sum(PositionHistory.realized_pnl - PositionHistory.total_fee).label('pnl')
     ).where(
-        PositionHistory.account_id == account_id,
-        extract('year', PositionHistory.closed_at) == year,
-        extract('month', PositionHistory.closed_at) == month
-    ).group_by(
+        PositionHistory.account_id == account_id
+    )
+
+    if start_date and end_date:
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1) # Include the end date
+        stmt = stmt.where(PositionHistory.closed_at >= start_dt, PositionHistory.closed_at < end_dt)
+    elif year and month:
+        stmt = stmt.where(
+            extract('year', PositionHistory.closed_at) == year,
+            extract('month', PositionHistory.closed_at) == month
+        )
+    
+    stmt = stmt.group_by(
         date_expr
     ).order_by(
         date_expr
