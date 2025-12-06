@@ -260,10 +260,22 @@ export default function Chart() {
               
               // SL/TP
               if (pos.stop_loss_price) {
-                  addPriceLine(pos.stop_loss_price, 'SL', '#ef5350', LineStyle.Solid, { type: 'SL', positionId: pos.id });
+                  const slPrice = parseFloat(pos.stop_loss_price);
+                  const qty = parseFloat(pos.quantity);
+                  const entry = parseFloat(pos.entry_price);
+                  const pnl = (slPrice - entry) * qty;
+                  const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`;
+                  
+                  addPriceLine(pos.stop_loss_price, `SL ${pnlStr}`, '#ef5350', LineStyle.Solid, { type: 'SL', positionId: pos.id });
               }
               if (pos.take_profit_price) {
-                  addPriceLine(pos.take_profit_price, 'TP', '#26a69a', LineStyle.Solid, { type: 'TP', positionId: pos.id });
+                  const tpPrice = parseFloat(pos.take_profit_price);
+                  const qty = parseFloat(pos.quantity);
+                  const entry = parseFloat(pos.entry_price);
+                  const pnl = (tpPrice - entry) * qty;
+                  const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`;
+
+                  addPriceLine(pos.take_profit_price, `TP ${pnlStr}`, '#26a69a', LineStyle.Solid, { type: 'TP', positionId: pos.id });
               }
             }
           });
