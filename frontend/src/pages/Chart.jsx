@@ -1,11 +1,14 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { createChart, ColorType, CandlestickSeries, LineStyle, CrosshairMode } from 'lightweight-charts';
+import { createChart, ColorType, CandlestickSeries, LineStyle, CrosshairMode, createSeriesMarkers } from 'lightweight-charts';
+import { CountdownPrimitive } from '../plugins/CountdownPrimitive';
 import { useAuth } from '../context/AuthContext';
 
 export default function Chart() {
   const { user } = useAuth();
   const chartContainerRef = useRef();
   const seriesRef = useRef(null);
+  const markersPrimitiveRef = useRef(null);
+  const countdownPrimitiveRef = useRef(null);
   const priceLinesRef = useRef([]);
   const chartRef = useRef(null);
   const lastPriceRef = useRef(null);
@@ -299,13 +302,48 @@ export default function Chart() {
                }
             }
           });
+
+          // Add Markers for Filled Orders (History)
+          const markers = ordersData
+              .filter(o => o.symbol === symbol && o.status === 'FILLED')
+              .map(o => {
+                  const originalTime = new Date(o.created_at).getTime() / 1000;
+                  let interval = 3600; // Default 1h
+                  if (timeframe === '1m') interval = 60;
+                  else if (timeframe === '15m') interval = 15 * 60;
+                  else if (timeframe === '1h') interval = 60 * 60;
+                  else if (timeframe === '4h') interval = 4 * 60 * 60;
+                  else if (timeframe === '1d') interval = 24 * 60 * 60;
+                  
+                  // Normalize time to the start of the candle
+                  const normalizedTime = Math.floor(originalTime / interval) * interval;
+
+                  return {
+                      time: normalizedTime,
+                      position: o.side === 'BUY' ? 'belowBar' : 'aboveBar',
+                      color: o.side === 'BUY' ? '#2196F3' : '#E91E63',
+                      shape: o.side === 'BUY' ? 'arrowUp' : 'arrowDown',
+                      text: `${o.quantity} @ ${o.price}`
+                  };
+              });
+           
+           // Sort markers by time
+           markers.sort((a, b) => a.time - b.time);
+           
+           if (seriesRef.current) {
+               if (!markersPrimitiveRef.current) {
+                   markersPrimitiveRef.current = createSeriesMarkers(seriesRef.current, markers);
+               } else {
+                   markersPrimitiveRef.current.setMarkers(markers);
+               }
+           }
         }
       }
 
     } catch (err) {
       console.error("Failed to fetch overlay data", err);
     }
-  }, [user, symbol]);
+  }, [user, symbol, timeframe]);
 
   // Keyboard Shortcuts for Trading
   useEffect(() => {
@@ -523,6 +561,8 @@ export default function Chart() {
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
+    let isDisposed = false;
+
     console.log("Initializing chart...");
     // Clear previous content
     chartContainerRef.current.innerHTML = '';
@@ -564,6 +604,11 @@ export default function Chart() {
     
     seriesRef.current = newSeries;
 
+    // Add Countdown Primitive
+    const countdownPrimitive = new CountdownPrimitive({ timeframe });
+    newSeries.attachPrimitive(countdownPrimitive);
+    countdownPrimitiveRef.current = countdownPrimitive;
+
     // Subscribe to crosshair move to capture mouse price
     chart.subscribeCrosshairMove((param) => {
         if (param.point && seriesRef.current) {
@@ -577,9 +622,10 @@ export default function Chart() {
     let ws = null;
 
     const loadData = async (endTime = null) => {
-      if (isLoadingRef.current) return;
+      if (isLoadingRef.current || isDisposed) return;
       if (endTime && !hasMoreRef.current) return;
 
+      console.log(`Loading data... endTime=${endTime}, symbol=${symbol}, timeframe=${timeframe}`);
       isLoadingRef.current = true;
 
       try {
@@ -592,15 +638,21 @@ export default function Chart() {
 
         const response = await fetch(url);
         
+        if (isDisposed) return; // Check again after await
+
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
 
         const data = await response.json();
         
+        if (isDisposed) return; // Check again after await
+
         if (!Array.isArray(data)) {
             throw new Error("Invalid data format");
         }
+        
+        console.log(`Loaded ${data.length} candles`);
 
         const cdata = data.map(d => ({
           time: d[0] / 1000,
@@ -633,8 +685,12 @@ export default function Chart() {
             }
 
             // Check if series is still valid before setting data
-            if (seriesRef.current && chartRef.current) {
+            if (seriesRef.current && chartRef.current && !isDisposed) {
                 seriesRef.current.setData(allDataRef.current);
+                // Ensure visible range is set correctly for initial load
+                if (!endTime) {
+                    chartRef.current.timeScale().fitContent();
+                }
             }
             
             if (!endTime && cdata.length > 0) {
@@ -643,11 +699,12 @@ export default function Chart() {
         }
 
         // Initial overlay update (only on first load)
-        if (!endTime) {
+        if (!endTime && !isDisposed) {
             updateOverlayData();
         }
 
       } catch (err) {
+        if (isDisposed) return;
         console.error("Chart Error:", err);
         setError(err.message);
       } finally {
@@ -661,10 +718,11 @@ export default function Chart() {
     // Subscribe to visible logical range change for infinite scrolling
     let scrollTimeout = null;
     chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-        if (scrollTimeout) return; // Throttle
+        if (scrollTimeout || isDisposed) return; // Throttle
 
         scrollTimeout = setTimeout(() => {
             scrollTimeout = null;
+            if (isDisposed) return;
             if (range && range.from < 10 && !isLoadingRef.current && hasMoreRef.current) {
                  const firstData = allDataRef.current[0];
                  if (firstData) {
@@ -682,13 +740,16 @@ export default function Chart() {
     // Use local proxy to avoid CORS/Network issues
     const wsUrl = `${protocol}//${host}/api/market/ws/klines/${symbol}/${timeframe}`;
     
-    ws = new WebSocket(wsUrl);
+    let wsTimeout = setTimeout(() => {
+        if (isDisposed) return;
+        ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
             console.log('Connected to WS Proxy');
         };
 
         ws.onmessage = (event) => {
+          if (isDisposed) return;
           try {
             const message = JSON.parse(event.data);
             if (!message.k) return;
@@ -715,7 +776,7 @@ export default function Chart() {
             lastPriceRef.current = close;
             
             // Check validity before update
-            if (seriesRef.current && chartRef.current) {
+            if (seriesRef.current && chartRef.current && !isDisposed) {
                 newSeries.update(candle);
             }
           } catch (e) {
@@ -728,23 +789,28 @@ export default function Chart() {
             if (isDisposed) return;
             console.error('WS Error:', err);
         };
+    }, 100); // Delay WS connection slightly
 
     // Poll for overlay updates every 5 seconds
     const overlayInterval = setInterval(updateOverlayData, 5000);
 
     const handleResize = () => {
-        if (chartContainerRef.current) {
-            chart.applyOptions({ 
-                width: chartContainerRef.current.clientWidth,
-                height: chartContainerRef.current.clientHeight
-            });
+        if (isDisposed) return;
+        if (chartContainerRef.current && chartRef.current) {
+            try {
+                chartRef.current.applyOptions({ 
+                    width: chartContainerRef.current.clientWidth,
+                    height: chartContainerRef.current.clientHeight
+                });
+            } catch (e) {
+                // Ignore resize errors during disposal
+            }
         }
     };
     window.addEventListener('resize', handleResize);
 
     // Sync labels loop
     let animationFrameId;
-    let isDisposed = false; // Flag to track disposal
 
     const syncLabels = () => {
         if (isDisposed) return; // Stop if disposed
@@ -779,24 +845,43 @@ export default function Chart() {
       window.removeEventListener('resize', handleResize);
       cancelAnimationFrame(animationFrameId);
       clearInterval(overlayInterval);
-      if (ws) ws.close();
+      if (scrollTimeout) clearTimeout(scrollTimeout);
+      if (wsTimeout) clearTimeout(wsTimeout);
+      
+      if (ws) {
+          // Avoid "WebSocket is closed before the connection is established" if possible
+          if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN) {
+              ws.close();
+          }
+      }
       
       // Clean up chart
       // Important: Remove series first, then chart
       try {
-          if (seriesRef.current && chartRef.current) {
-             // No need to remove series explicitly if removing chart, but good practice
-             // chartRef.current.removeSeries(seriesRef.current);
+          if (seriesRef.current) {
+              if (countdownPrimitiveRef.current) {
+                  seriesRef.current.detachPrimitive(countdownPrimitiveRef.current);
+              }
+              if (markersPrimitiveRef.current) {
+                  // markersPrimitiveRef.current is the primitive instance
+                  seriesRef.current.detachPrimitive(markersPrimitiveRef.current);
+              }
           }
-          if (chartRef.current) {
-              chartRef.current.remove();
+
+          if (chart) {
+              chart.remove();
           }
       } catch (e) {
           console.error("Error removing chart", e);
       }
       
       seriesRef.current = null;
+      markersPrimitiveRef.current = null;
+      countdownPrimitiveRef.current = null;
       chartRef.current = null;
+      
+      // Reset loading state to allow new fetches on remount
+      isLoadingRef.current = false;
       
       // Clear labels
       if (labelsContainerRef.current) {
