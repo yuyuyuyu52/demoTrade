@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { createChart, ColorType, CandlestickSeries, LineStyle, CrosshairMode, createSeriesMarkers } from 'lightweight-charts';
 import { CountdownPrimitive } from '../plugins/CountdownPrimitive';
 import { DrawingsPrimitive } from '../plugins/DrawingsPrimitive';
+import { FVGPrimitive } from '../plugins/FVGPrimitive';
 import { useAuth } from '../context/AuthContext';
-import { Pencil, Square, TrendingUp, ArrowUpCircle, ArrowDownCircle, Trash2, MousePointer2 } from 'lucide-react';
+import { Pencil, Square, TrendingUp, ArrowUpCircle, ArrowDownCircle, Trash2, MousePointer2, Settings } from 'lucide-react';
 
 export default function Chart() {
   const { user } = useAuth();
@@ -12,6 +13,7 @@ export default function Chart() {
   const markersPrimitiveRef = useRef(null);
   const countdownPrimitiveRef = useRef(null);
   const drawingsPrimitiveRef = useRef(null);
+  const fvgPrimitiveRef = useRef(null);
   const priceLinesRef = useRef([]);
   const chartRef = useRef(null);
   const lastPriceRef = useRef(null);
@@ -26,6 +28,17 @@ export default function Chart() {
   const [activeTool, setActiveTool] = useState('cursor'); // cursor, line, rect, fib, long, short
   const [drawings, setDrawings] = useState([]);
   const currentDrawingRef = useRef(null);
+
+  // Chart Settings
+  const [showSettings, setShowSettings] = useState(false);
+  const [showFVG, setShowFVG] = useState(false);
+  const [chartOptions, setChartOptions] = useState({
+      upColor: '#00C853',
+      downColor: '#FF5252',
+      wickUpColor: '#00C853',
+      wickDownColor: '#FF5252',
+      borderVisible: false,
+  });
 
   // Initialize state from localStorage if available
   const [symbol, setSymbol] = useState(() => localStorage.getItem('chart_symbol') || 'BTCUSDT');
@@ -43,6 +56,106 @@ export default function Chart() {
       localStorage.setItem('chart_timeframe', timeframe);
       localStorage.setItem('chart_quantity', quantity);
   }, [symbol, timeframe, quantity]);
+
+  // Apply Chart Options
+  useEffect(() => {
+      if (seriesRef.current) {
+          seriesRef.current.applyOptions({
+              upColor: chartOptions.upColor,
+              downColor: chartOptions.downColor,
+              wickUpColor: chartOptions.wickUpColor,
+              wickDownColor: chartOptions.wickDownColor,
+              borderVisible: chartOptions.borderVisible,
+          });
+      }
+  }, [chartOptions]);
+
+  // FVG Calculation
+  const calculateFVGs = useCallback((data) => {
+      if (!data || data.length < 3) return [];
+      const fvgs = [];
+      let filledCount = 0;
+      
+      for (let i = 2; i < data.length; i++) {
+          const curr = data[i];
+          const prev2 = data[i-2];
+
+          // Bullish FVG: Low[i] > High[i-2]
+          if (curr.low > prev2.high) {
+              const top = curr.low;
+              const bottom = prev2.high;
+              
+              // Check if filled by SUBSEQUENT candles
+              let filled = false;
+              for (let j = i + 1; j < data.length; j++) {
+                  // Only body can fill FVG
+                  const bodyLow = Math.min(data[j].open, data[j].close);
+                  if (bodyLow <= bottom) {
+                      filled = true;
+                      break;
+                  }
+              }
+              
+              if (!filled) {
+                  fvgs.push({
+                      time: prev2.time,
+                      top,
+                      bottom,
+                      type: 'bullish'
+                  });
+              } else {
+                  filledCount++;
+              }
+          }
+
+          // Bearish FVG: High[i] < Low[i-2]
+          if (curr.high < prev2.low) {
+              const top = prev2.low;
+              const bottom = curr.high;
+              
+              let filled = false;
+              for (let j = i + 1; j < data.length; j++) {
+                  // Only body can fill FVG
+                  const bodyHigh = Math.max(data[j].open, data[j].close);
+                  if (bodyHigh >= top) {
+                      filled = true;
+                      break;
+                  }
+              }
+              
+              if (!filled) {
+                  fvgs.push({
+                      time: prev2.time,
+                      top,
+                      bottom,
+                      type: 'bearish'
+                  });
+              } else {
+                  filledCount++;
+              }
+          }
+      }
+      console.log(`Calculated FVGs: ${fvgs.length} active, ${filledCount} filled`);
+      return fvgs;
+  }, []);
+
+  // Update FVGs
+  const updateFVGs = useCallback(() => {
+      if (!fvgPrimitiveRef.current) return;
+      
+      if (!showFVG) {
+          fvgPrimitiveRef.current.setFVGs([]);
+          return;
+      }
+
+      const fvgs = calculateFVGs(allDataRef.current);
+      fvgPrimitiveRef.current.setFVGs(fvgs);
+  }, [showFVG, calculateFVGs]);
+
+  // Update FVGs when data changes or toggle changes
+  useEffect(() => {
+      updateFVGs();
+  }, [updateFVGs, showFVG]); // Note: allDataRef is a ref, so it doesn't trigger effect. We need to call updateFVGs manually when data loads.
 
   // Fetch Drawings from Backend
   const fetchDrawings = useCallback(async () => {
@@ -753,6 +866,11 @@ export default function Chart() {
     // Restore drawings if any (though state is reset on mount usually, but if we persisted it...)
     drawingsPrimitive.setDrawings(drawings);
 
+    // Add FVG Primitive
+    const fvgPrimitive = new FVGPrimitive();
+    newSeries.attachPrimitive(fvgPrimitive);
+    fvgPrimitiveRef.current = fvgPrimitive;
+
     // Subscribe to crosshair move to capture mouse price
     chart.subscribeCrosshairMove((param) => {
         if (param.point && seriesRef.current) {
@@ -862,6 +980,9 @@ export default function Chart() {
             }
         }
 
+        // Update FVGs
+        updateFVGs();
+
         // Initial overlay update (only on first load)
         if (!endTime && !isDisposed) {
             updateOverlayData();
@@ -942,6 +1063,19 @@ export default function Chart() {
             // Check validity before update
             if (seriesRef.current && chartRef.current && !isDisposed) {
                 newSeries.update(candle);
+                
+                // Update internal data for FVG calculation
+                // We need to update the last candle in allDataRef or append if new
+                const lastData = allDataRef.current[allDataRef.current.length - 1];
+                if (lastData && lastData.time === candle.time) {
+                    allDataRef.current[allDataRef.current.length - 1] = candle;
+                } else {
+                    allDataRef.current.push(candle);
+                }
+                
+                // Throttle FVG updates? Or just update.
+                // For now, update every time.
+                updateFVGs();
             }
           } catch (e) {
             console.error("WS Message Error:", e);
@@ -1155,9 +1289,89 @@ export default function Chart() {
             >
                 <Trash2 size={18} />
             </button>
+            <button 
+                onClick={() => setShowSettings(true)}
+                className="p-2 text-gray-600 hover:bg-gray-50"
+                title="Chart Settings"
+            >
+                <Settings size={18} />
+            </button>
         </div>
       </div>
       
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white p-6 rounded-lg shadow-xl w-80">
+                <h3 className="text-lg font-bold mb-4">Chart Settings</h3>
+                
+                <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                        <label className="text-sm font-medium">Show FVG</label>
+                        <input 
+                            type="checkbox" 
+                            checked={showFVG} 
+                            onChange={(e) => setShowFVG(e.target.checked)}
+                            className="h-4 w-4"
+                        />
+                    </div>
+
+                    <div className="border-t pt-4">
+                        <h4 className="text-sm font-semibold mb-2">Colors</h4>
+                        
+                        <div className="grid grid-cols-2 gap-2">
+                            <div>
+                                <label className="block text-xs text-gray-500 mb-1">Up Color</label>
+                                <input 
+                                    type="color" 
+                                    value={chartOptions.upColor}
+                                    onChange={(e) => setChartOptions({...chartOptions, upColor: e.target.value})}
+                                    className="w-full h-8 p-0 border-0"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs text-gray-500 mb-1">Down Color</label>
+                                <input 
+                                    type="color" 
+                                    value={chartOptions.downColor}
+                                    onChange={(e) => setChartOptions({...chartOptions, downColor: e.target.value})}
+                                    className="w-full h-8 p-0 border-0"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs text-gray-500 mb-1">Wick Up</label>
+                                <input 
+                                    type="color" 
+                                    value={chartOptions.wickUpColor}
+                                    onChange={(e) => setChartOptions({...chartOptions, wickUpColor: e.target.value})}
+                                    className="w-full h-8 p-0 border-0"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs text-gray-500 mb-1">Wick Down</label>
+                                <input 
+                                    type="color" 
+                                    value={chartOptions.wickDownColor}
+                                    onChange={(e) => setChartOptions({...chartOptions, wickDownColor: e.target.value})}
+                                    className="w-full h-8 p-0 border-0"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mt-6 flex justify-end">
+                    <button 
+                        onClick={() => setShowSettings(false)}
+                        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                    >
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
+
       {error && (
         <div className="mb-4 p-4 bg-red-100 text-red-700 rounded flex-shrink-0">
             Error: {error}. Please check your connection or try a different symbol.
