@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum, JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 import enum
@@ -38,6 +38,19 @@ class Account(Base):
     orders: Mapped[list["Order"]] = relationship(back_populates="account")
     equity_history: Mapped[list["EquityHistory"]] = relationship(back_populates="account")
     position_history: Mapped[list["PositionHistory"]] = relationship(back_populates="account")
+    drawings: Mapped[list["Drawing"]] = relationship(back_populates="account")
+
+class Drawing(Base):
+    __tablename__ = "drawings"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    symbol: Mapped[str] = mapped_column(String, index=True)
+    type: Mapped[str] = mapped_column(String)
+    data: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    account: Mapped["Account"] = relationship(back_populates="drawings")
 
 class EquityHistory(Base):
     __tablename__ = "equity_history"

@@ -114,6 +114,23 @@ class AccountStatistics(BaseModel):
     class Config:
         from_attributes = True
 
+class DrawingCreate(BaseModel):
+    account_id: int
+    symbol: str
+    type: str
+    data: dict
+
+class DrawingResponse(BaseModel):
+    id: int
+    account_id: int
+    symbol: str
+    type: str
+    data: dict
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 class OrderUpdate(BaseModel):
     price: Optional[float] = None
     quantity: Optional[float] = None

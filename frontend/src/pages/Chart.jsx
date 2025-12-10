@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createChart, ColorType, CandlestickSeries, LineStyle, CrosshairMode, createSeriesMarkers } from 'lightweight-charts';
 import { CountdownPrimitive } from '../plugins/CountdownPrimitive';
+import { DrawingsPrimitive } from '../plugins/DrawingsPrimitive';
 import { useAuth } from '../context/AuthContext';
+import { Pencil, Square, TrendingUp, ArrowUpCircle, ArrowDownCircle, Trash2, MousePointer2 } from 'lucide-react';
 
 export default function Chart() {
   const { user } = useAuth();
@@ -9,6 +11,7 @@ export default function Chart() {
   const seriesRef = useRef(null);
   const markersPrimitiveRef = useRef(null);
   const countdownPrimitiveRef = useRef(null);
+  const drawingsPrimitiveRef = useRef(null);
   const priceLinesRef = useRef([]);
   const chartRef = useRef(null);
   const lastPriceRef = useRef(null);
@@ -19,6 +22,11 @@ export default function Chart() {
   const isLoadingRef = useRef(false);
   const hasMoreRef = useRef(true);
   
+  // Drawing Tools State
+  const [activeTool, setActiveTool] = useState('cursor'); // cursor, line, rect, fib, long, short
+  const [drawings, setDrawings] = useState([]);
+  const currentDrawingRef = useRef(null);
+
   // Initialize state from localStorage if available
   const [symbol, setSymbol] = useState(() => localStorage.getItem('chart_symbol') || 'BTCUSDT');
   const [timeframe, setTimeframe] = useState(() => localStorage.getItem('chart_timeframe') || '1h');
@@ -35,6 +43,64 @@ export default function Chart() {
       localStorage.setItem('chart_timeframe', timeframe);
       localStorage.setItem('chart_quantity', quantity);
   }, [symbol, timeframe, quantity]);
+
+  // Fetch Drawings from Backend
+  const fetchDrawings = useCallback(async () => {
+      if (!user) return;
+      try {
+          const res = await fetch(`/api/drawings/?account_id=${user.id}&symbol=${symbol}`);
+          if (res.ok) {
+              const data = await res.json();
+              const loadedDrawings = data.map(d => ({
+                  id: d.id,
+                  type: d.type,
+                  p1: d.data.p1,
+                  p2: d.data.p2
+              }));
+              setDrawings(loadedDrawings);
+              if (drawingsPrimitiveRef.current) {
+                  drawingsPrimitiveRef.current.setDrawings(loadedDrawings);
+              }
+          }
+      } catch (err) {
+          console.error("Failed to fetch drawings", err);
+      }
+  }, [user, symbol]);
+
+  useEffect(() => {
+      fetchDrawings();
+  }, [fetchDrawings]);
+
+  // Save Drawing to Backend
+  const saveDrawing = async (drawing) => {
+      if (!user) return;
+      try {
+          const payload = {
+              account_id: user.id,
+              symbol: symbol,
+              type: drawing.type,
+              data: { p1: drawing.p1, p2: drawing.p2 }
+          };
+          const res = await fetch('/api/drawings/', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+          });
+          if (res.ok) {
+              const saved = await res.json();
+              setDrawings(prev => {
+                  return prev.map(d => {
+                      if (d === drawing) {
+                          return { ...d, id: saved.id };
+                      }
+                      return d;
+                  });
+              });
+          }
+      } catch (err) {
+          console.error("Failed to save drawing", err);
+      }
+  };
 
   // Helper to clear all price lines and labels
   const clearPriceLines = () => {
@@ -429,6 +495,54 @@ export default function Chart() {
 
       const handleMouseDown = (e) => {
           if (!seriesRef.current || !chartRef.current) return;
+          
+          // Drawing Logic
+          if (activeTool !== 'cursor') {
+              const rect = container.getBoundingClientRect();
+              const x = e.clientX - rect.left;
+              const y = e.clientY - rect.top;
+              
+              const price = seriesRef.current.coordinateToPrice(y);
+              const time = chartRef.current.timeScale().coordinateToTime(x);
+              
+              if (price !== null && time !== null) {
+                  if (!currentDrawingRef.current) {
+                      // First Click: Start Drawing
+                      currentDrawingRef.current = {
+                          type: activeTool,
+                          p1: { time, price },
+                          p2: { time, price } // Initially p2 = p1
+                      };
+                      // Disable chart scrolling while drawing
+                      chartRef.current.applyOptions({ handleScroll: false, handleScale: false });
+                  } else {
+                      // Second Click: Finish Drawing
+                      const newDrawing = {
+                          ...currentDrawingRef.current,
+                          p2: { time, price }
+                      };
+                      
+                      // Save to Backend
+                      saveDrawing(newDrawing);
+
+                      setDrawings(prev => {
+                          const updated = [...prev, newDrawing];
+                          if (drawingsPrimitiveRef.current) {
+                              drawingsPrimitiveRef.current.setDrawings(updated);
+                          }
+                          return updated;
+                      });
+                      
+                      currentDrawingRef.current = null;
+                      setActiveTool('cursor'); // Reset tool
+                      
+                      // Re-enable chart interactions
+                      chartRef.current.applyOptions({ handleScroll: true, handleScale: true });
+                  }
+              }
+              return;
+          }
+
           // If already dragging/placing, don't select another line
           if (draggingLineRef.current) return;
 
@@ -474,8 +588,25 @@ export default function Chart() {
       const handleMouseMove = (e) => {
           if (!seriesRef.current) return;
           const rect = container.getBoundingClientRect();
+          const x = e.clientX - rect.left;
           const y = e.clientY - rect.top;
           
+          // Drawing Logic
+          if (currentDrawingRef.current) {
+              const price = seriesRef.current.coordinateToPrice(y);
+              const time = chartRef.current.timeScale().coordinateToTime(x);
+              
+              if (price !== null && time !== null) {
+                  currentDrawingRef.current.p2 = { time, price };
+                  
+                  // Update primitive
+                  if (drawingsPrimitiveRef.current) {
+                      drawingsPrimitiveRef.current.setDrawings([...drawings, currentDrawingRef.current]);
+                  }
+              }
+              return;
+          }
+
           const currentDraggingLine = draggingLineRef.current;
 
           if (currentDraggingLine) {
@@ -501,10 +632,16 @@ export default function Chart() {
                   }
               });
               container.style.cursor = hovering ? 'ns-resize' : 'default';
+              
+              if (activeTool !== 'cursor') {
+                  container.style.cursor = 'crosshair';
+              }
           }
       };
 
       const handleMouseUp = async () => {
+          // Drawing Logic handled in MouseDown (Two Clicks)
+
           const currentDraggingLine = draggingLineRef.current;
           if (currentDraggingLine) {
               // Commit change
@@ -556,7 +693,7 @@ export default function Chart() {
           container.removeEventListener('mousemove', handleMouseMove);
           window.removeEventListener('mouseup', handleMouseUp);
       };
-  }, [updateOverlayData]); // Only re-bind if updateOverlayData changes (which depends on user/symbol)
+  }, [updateOverlayData, activeTool, drawings]); // Re-bind when activeTool or drawings change
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -608,6 +745,13 @@ export default function Chart() {
     const countdownPrimitive = new CountdownPrimitive({ timeframe });
     newSeries.attachPrimitive(countdownPrimitive);
     countdownPrimitiveRef.current = countdownPrimitive;
+
+    // Add Drawings Primitive
+    const drawingsPrimitive = new DrawingsPrimitive();
+    newSeries.attachPrimitive(drawingsPrimitive);
+    drawingsPrimitiveRef.current = drawingsPrimitive;
+    // Restore drawings if any (though state is reset on mount usually, but if we persisted it...)
+    drawingsPrimitive.setDrawings(drawings);
 
     // Subscribe to crosshair move to capture mouse price
     chart.subscribeCrosshairMove((param) => {
@@ -662,25 +806,45 @@ export default function Chart() {
           close: parseFloat(d[4]),
         }));
 
-        cdata.sort((a, b) => a.time - b.time);
+        // Dedup cdata internally
+        const uniqueCData = [];
+        const seenTimes = new Set();
+        for (const item of cdata) {
+            if (!seenTimes.has(item.time)) {
+                seenTimes.add(item.time);
+                uniqueCData.push(item);
+            }
+        }
         
-        if (cdata.length === 0) {
+        if (uniqueCData.length === 0) {
             if (endTime) hasMoreRef.current = false;
         } else {
             if (endTime) {
                 // Prepend data
                 // Filter out duplicates based on time
                 const existingTimes = new Set(allDataRef.current.map(d => d.time));
-                const uniqueNewData = cdata.filter(d => !existingTimes.has(d.time));
+                const uniqueNewData = uniqueCData.filter(d => !existingTimes.has(d.time));
                 
                 if (uniqueNewData.length === 0) {
                     hasMoreRef.current = false;
                 } else {
-                    allDataRef.current = [...uniqueNewData, ...allDataRef.current];
+                    // Merge and Sort
+                    allDataRef.current = [...uniqueNewData, ...allDataRef.current].sort((a, b) => a.time - b.time);
+                    
+                    // Double check for duplicates after merge (paranoid check)
+                    const finalData = [];
+                    const finalTimes = new Set();
+                    for (const item of allDataRef.current) {
+                        if (!finalTimes.has(item.time)) {
+                            finalTimes.add(item.time);
+                            finalData.push(item);
+                        }
+                    }
+                    allDataRef.current = finalData;
                 }
             } else {
                 // Initial load
-                allDataRef.current = cdata;
+                allDataRef.current = uniqueCData;
                 hasMoreRef.current = true;
             }
 
@@ -866,6 +1030,9 @@ export default function Chart() {
                   // markersPrimitiveRef.current is the primitive instance
                   seriesRef.current.detachPrimitive(markersPrimitiveRef.current);
               }
+              if (drawingsPrimitiveRef.current) {
+                  seriesRef.current.detachPrimitive(drawingsPrimitiveRef.current);
+              }
           }
 
           if (chart) {
@@ -878,6 +1045,7 @@ export default function Chart() {
       seriesRef.current = null;
       markersPrimitiveRef.current = null;
       countdownPrimitiveRef.current = null;
+      drawingsPrimitiveRef.current = null;
       chartRef.current = null;
       
       // Reset loading state to allow new fetches on remount
@@ -929,6 +1097,64 @@ export default function Chart() {
                 className="p-2 border rounded shadow-sm w-24"
                 step="0.001"
             />
+        </div>
+
+        {/* Drawing Tools Toolbar */}
+        <div className="flex border rounded shadow-sm overflow-hidden ml-4 bg-white">
+            <button 
+                onClick={() => setActiveTool('cursor')}
+                className={`p-2 ${activeTool === 'cursor' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                title="Cursor"
+            >
+                <MousePointer2 size={18} />
+            </button>
+            <button 
+                onClick={() => setActiveTool('line')}
+                className={`p-2 ${activeTool === 'line' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                title="Trend Line"
+            >
+                <Pencil size={18} />
+            </button>
+            <button 
+                onClick={() => setActiveTool('rect')}
+                className={`p-2 ${activeTool === 'rect' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                title="Rectangle"
+            >
+                <Square size={18} />
+            </button>
+            <button 
+                onClick={() => setActiveTool('fib')}
+                className={`p-2 ${activeTool === 'fib' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                title="Fibonacci Retracement"
+            >
+                <TrendingUp size={18} />
+            </button>
+            <button 
+                onClick={() => setActiveTool('long')}
+                className={`p-2 ${activeTool === 'long' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                title="Long Position"
+            >
+                <ArrowUpCircle size={18} />
+            </button>
+            <button 
+                onClick={() => setActiveTool('short')}
+                className={`p-2 ${activeTool === 'short' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                title="Short Position"
+            >
+                <ArrowDownCircle size={18} />
+            </button>
+            <button 
+                onClick={() => {
+                    setDrawings([]);
+                    if (drawingsPrimitiveRef.current) {
+                        drawingsPrimitiveRef.current.setDrawings([]);
+                    }
+                }}
+                className="p-2 text-red-600 hover:bg-red-50"
+                title="Clear All Drawings"
+            >
+                <Trash2 size={18} />
+            </button>
         </div>
       </div>
       
