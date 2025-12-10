@@ -49,6 +49,10 @@ export default function Chart() {
   });
   const [error, setError] = useState(null);
   const [draggingLine, setDraggingLine] = useState(null);
+  
+  // Real-time Price State
+  const [currentPrice, setCurrentPrice] = useState(null);
+  const [priceColor, setPriceColor] = useState('text-gray-800');
 
   // Save settings to localStorage whenever they change
   useEffect(() => {
@@ -976,7 +980,9 @@ export default function Chart() {
             }
             
             if (!endTime && cdata.length > 0) {
-                lastPriceRef.current = cdata[cdata.length - 1].close;
+                const lastClose = cdata[cdata.length - 1].close;
+                lastPriceRef.current = lastClose;
+                setCurrentPrice(lastClose);
             }
         }
 
@@ -1058,6 +1064,15 @@ export default function Chart() {
               close: close,
             };
             
+            // Update Price Display
+            if (lastPriceRef.current) {
+                if (close > lastPriceRef.current) {
+                    setPriceColor('text-green-600');
+                } else if (close < lastPriceRef.current) {
+                    setPriceColor('text-red-600');
+                }
+            }
+            setCurrentPrice(close);
             lastPriceRef.current = close;
             
             // Check validity before update
@@ -1194,108 +1209,124 @@ export default function Chart() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-64px)] p-4">
-      <div className="mb-4 flex gap-4 flex-shrink-0">
-        <select 
-          value={symbol} 
-          onChange={(e) => setSymbol(e.target.value)}
-          className="p-2 border rounded shadow-sm"
-        >
-          <option value="BTCUSDT">BTC/USDT</option>
-          <option value="ETHUSDT">ETH/USDT</option>
-          <option value="BNBUSDT">BNB/USDT</option>
-          <option value="SOLUSDT">SOL/USDT</option>
-        </select>
-        
-        <div className="flex border rounded shadow-sm overflow-hidden">
-          {['1m', '15m', '1h', '4h', '1d'].map((tf) => (
-            <button
-              key={tf}
-              onClick={() => setTimeframe(tf)}
-              className={`px-3 py-2 text-sm font-medium transition-colors ${
-                timeframe === tf
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white text-gray-700 hover:bg-gray-100'
-              }`}
-            >
-              {tf}
-            </button>
-          ))}
+      <div className="mb-4 flex justify-between items-center flex-shrink-0">
+        {/* Left Side: Price & Timeframes */}
+        <div className="flex items-center gap-6">
+            <div className={`text-2xl font-bold font-mono ${priceColor} min-w-[120px]`}>
+                {currentPrice ? currentPrice.toFixed(2) : '---'}
+            </div>
+
+            <div className="flex border rounded shadow-sm overflow-hidden">
+              {['1m', '15m', '1h', '4h', '1d'].map((tf) => (
+                <button
+                  key={tf}
+                  onClick={() => setTimeframe(tf)}
+                  className={`px-3 py-2 text-sm font-medium transition-colors ${
+                    timeframe === tf
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  {tf}
+                </button>
+              ))}
+            </div>
         </div>
 
-        <div className="flex items-center gap-2 ml-4">
-            <span className="text-sm font-medium text-gray-700">Qty:</span>
-            <input 
-                type="number" 
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
-                className="p-2 border rounded shadow-sm w-24"
-                step="0.001"
-            />
-        </div>
+        {/* Right Side: Symbols, Qty, Tools */}
+        <div className="flex items-center gap-4">
+            {/* Symbol Buttons */}
+            <div className="flex border rounded shadow-sm overflow-hidden">
+                {['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT'].map((sym) => (
+                    <button
+                        key={sym}
+                        onClick={() => setSymbol(sym)}
+                        className={`px-3 py-2 text-sm font-medium transition-colors ${
+                            symbol === sym
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-white text-gray-700 hover:bg-gray-100'
+                        }`}
+                    >
+                        {sym}
+                    </button>
+                ))}
+            </div>
 
-        {/* Drawing Tools Toolbar */}
-        <div className="flex border rounded shadow-sm overflow-hidden ml-4 bg-white">
-            <button 
-                onClick={() => setActiveTool('cursor')}
-                className={`p-2 ${activeTool === 'cursor' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
-                title="Cursor"
-            >
-                <MousePointer2 size={18} />
-            </button>
-            <button 
-                onClick={() => setActiveTool('line')}
-                className={`p-2 ${activeTool === 'line' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
-                title="Trend Line"
-            >
-                <Pencil size={18} />
-            </button>
-            <button 
-                onClick={() => setActiveTool('rect')}
-                className={`p-2 ${activeTool === 'rect' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
-                title="Rectangle"
-            >
-                <Square size={18} />
-            </button>
-            <button 
-                onClick={() => setActiveTool('fib')}
-                className={`p-2 ${activeTool === 'fib' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
-                title="Fibonacci Retracement"
-            >
-                <TrendingUp size={18} />
-            </button>
-            <button 
-                onClick={() => setActiveTool('long')}
-                className={`p-2 ${activeTool === 'long' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
-                title="Long Position"
-            >
-                <ArrowUpCircle size={18} />
-            </button>
-            <button 
-                onClick={() => setActiveTool('short')}
-                className={`p-2 ${activeTool === 'short' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
-                title="Short Position"
-            >
-                <ArrowDownCircle size={18} />
-            </button>
-            <button 
-                onClick={() => {
-                    setDrawings([]);
-                    if (drawingsPrimitiveRef.current) {
-                        drawingsPrimitiveRef.current.setDrawings([]);
-                    }
-                }}
-                className="p-2 text-red-600 hover:bg-red-50"
-                title="Clear All Drawings"
-            >
-                <Trash2 size={18} />
-            </button>
-            <button 
-                onClick={() => setShowSettings(true)}
-                className="p-2 text-gray-600 hover:bg-gray-50"
-                title="Chart Settings"
-            >
-                <Settings size={18} />
-            </button>
+            <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-700">Qty:</span>
+                <input 
+                    type="number" 
+                    value={quantity}
+                    onChange={(e) => setQuantity(e.target.value)}
+                    className="p-2 border rounded shadow-sm w-24"
+                    step="0.001"
+                />
+            </div>
+
+            {/* Drawing Tools Toolbar */}
+            <div className="flex border rounded shadow-sm overflow-hidden bg-white">
+                <button 
+                    onClick={() => setActiveTool('cursor')}
+                    className={`p-2 ${activeTool === 'cursor' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                    title="Cursor"
+                >
+                    <MousePointer2 size={18} />
+                </button>
+                <button 
+                    onClick={() => setActiveTool('line')}
+                    className={`p-2 ${activeTool === 'line' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                    title="Trend Line"
+                >
+                    <Pencil size={18} />
+                </button>
+                <button 
+                    onClick={() => setActiveTool('rect')}
+                    className={`p-2 ${activeTool === 'rect' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                    title="Rectangle"
+                >
+                    <Square size={18} />
+                </button>
+                <button 
+                    onClick={() => setActiveTool('fib')}
+                    className={`p-2 ${activeTool === 'fib' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                    title="Fibonacci Retracement"
+                >
+                    <TrendingUp size={18} />
+                </button>
+                <button 
+                    onClick={() => setActiveTool('long')}
+                    className={`p-2 ${activeTool === 'long' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                    title="Long Position"
+                >
+                    <ArrowUpCircle size={18} />
+                </button>
+                <button 
+                    onClick={() => setActiveTool('short')}
+                    className={`p-2 ${activeTool === 'short' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                    title="Short Position"
+                >
+                    <ArrowDownCircle size={18} />
+                </button>
+                <button 
+                    onClick={() => {
+                        setDrawings([]);
+                        if (drawingsPrimitiveRef.current) {
+                            drawingsPrimitiveRef.current.setDrawings([]);
+                        }
+                    }}
+                    className="p-2 text-red-600 hover:bg-red-50"
+                    title="Clear All Drawings"
+                >
+                    <Trash2 size={18} />
+                </button>
+                <button 
+                    onClick={() => setShowSettings(true)}
+                    className="p-2 text-gray-600 hover:bg-gray-50"
+                    title="Chart Settings"
+                >
+                    <Settings size={18} />
+                </button>
+            </div>
         </div>
       </div>
       
