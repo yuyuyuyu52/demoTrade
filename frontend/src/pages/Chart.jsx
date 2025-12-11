@@ -6,6 +6,62 @@ import { FVGPrimitive } from '../plugins/FVGPrimitive';
 import { useAuth } from '../context/AuthContext';
 import { Pencil, Square, TrendingUp, ArrowUpCircle, ArrowDownCircle, Trash2, MousePointer2, Settings } from 'lucide-react';
 
+const TIMEZONE = 'America/New_York';
+
+const timeframeToSeconds = (tf) => {
+    switch (tf) {
+        case '1m': return 60;
+        case '3m': return 3 * 60;
+        case '5m': return 5 * 60;
+        case '15m': return 15 * 60;
+        case '30m': return 30 * 60;
+        case '1h': return 60 * 60;
+        case '2h': return 2 * 60 * 60;
+        case '4h': return 4 * 60 * 60;
+        case '6h': return 6 * 60 * 60;
+        case '8h': return 8 * 60 * 60;
+        case '12h': return 12 * 60 * 60;
+        case '1d': return 24 * 60 * 60;
+        case '3d': return 3 * 24 * 60 * 60;
+        case '1w': return 7 * 24 * 60 * 60;
+        case '1M': return 30 * 24 * 60 * 60;
+        default: return 60 * 60; // fallback 1h
+    }
+};
+
+// Get timezone offset in seconds for a given timestamp (ms) and IANA zone
+const getTzOffsetSeconds = (ms, timeZone = TIMEZONE) => {
+    const dtf = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        hour12: false,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+    });
+
+    const parts = dtf.formatToParts(new Date(ms));
+    const filled = {};
+    for (const { type, value } of parts) {
+        filled[type] = value;
+    }
+    const asUTC = Date.UTC(
+        Number(filled.year),
+        Number(filled.month) - 1,
+        Number(filled.day),
+        Number(filled.hour),
+        Number(filled.minute),
+        Number(filled.second),
+    );
+
+    return (asUTC - ms) / 1000; // Positive means zone ahead of UTC
+};
+
+// Convert UTC ms timestamp to chart seconds shifted to TIMEZONE
+const toNySeconds = (ms) => Math.round(ms / 1000 + getTzOffsetSeconds(ms, TIMEZONE));
+
 export default function Chart() {
   const { user } = useAuth();
   const chartContainerRef = useRef();
@@ -32,12 +88,15 @@ export default function Chart() {
   // Chart Settings
   const [showSettings, setShowSettings] = useState(false);
   const [showFVG, setShowFVG] = useState(false);
+  const showFVGRef = useRef(false); // Ref to track latest showFVG for use inside closures
+  const isChartReadyRef = useRef(false); // Track if initial data is loaded
   const [chartOptions, setChartOptions] = useState({
       upColor: '#00C853',
       downColor: '#FF5252',
       wickUpColor: '#00C853',
       wickDownColor: '#FF5252',
       borderVisible: false,
+      borderColor: '#000000',
   });
 
   // Initialize state from localStorage if available
@@ -70,10 +129,12 @@ export default function Chart() {
               wickUpColor: chartOptions.wickUpColor,
               wickDownColor: chartOptions.wickDownColor,
               borderVisible: chartOptions.borderVisible,
+              borderColor: chartOptions.borderColor,
           });
       }
   }, [chartOptions]);
 
+  // Fetch Settings from Backend
   // FVG Calculation
   const calculateFVGs = useCallback((data) => {
       if (!data || data.length < 3) return [];
@@ -143,20 +204,84 @@ export default function Chart() {
       return fvgs;
   }, []);
 
+  // Fetch Settings from Backend
+  useEffect(() => {
+      if (!user) return;
+      const fetchSettings = async () => {
+          try {
+              const res = await fetch(`/api/accounts/${user.id}`);
+              if (res.ok) {
+                  const data = await res.json();
+                  if (data.chart_settings) {
+                      const s = data.chart_settings;
+                      if (s.showFVG !== undefined) {
+                          setShowFVG(s.showFVG);
+                          showFVGRef.current = s.showFVG; // Update ref immediately
+                          // Force update if data is already loaded
+                          if (allDataRef.current.length > 0 && fvgPrimitiveRef.current) {
+                              if (s.showFVG) {
+                                  const fvgs = calculateFVGs(allDataRef.current);
+                                  fvgPrimitiveRef.current.setFVGs(fvgs);
+                              } else {
+                                  fvgPrimitiveRef.current.setFVGs([]);
+                              }
+                          }
+                      }
+                      if (s.chartOptions) setChartOptions(prev => ({...prev, ...s.chartOptions}));
+                  }
+              }
+          } catch (e) {
+              console.error("Failed to fetch settings", e);
+          }
+      };
+      fetchSettings();
+  }, [user, calculateFVGs]); // Added calculateFVGs dependency
+
+  // Save Settings to Backend (Debounced)
+  useEffect(() => {
+      if (!user) return;
+      const settings = {
+          showFVG,
+          chartOptions
+      };
+      
+      const timer = setTimeout(async () => {
+          try {
+              await fetch(`/api/accounts/${user.id}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                      chart_settings: settings
+                  })
+              });
+          } catch (e) {
+              console.error("Failed to save settings", e);
+          }
+      }, 1000);
+      
+      return () => clearTimeout(timer);
+  }, [showFVG, chartOptions, user]);
+
+  // Sync showFVG to ref
+  useEffect(() => {
+      showFVGRef.current = showFVG;
+  }, [showFVG]);
+
   // Update FVGs
   const updateFVGs = useCallback(() => {
       if (!fvgPrimitiveRef.current) return;
       
-      if (!showFVG) {
+      // Use ref to get latest state, avoiding closure staleness in WS callbacks
+      if (!showFVGRef.current) {
           fvgPrimitiveRef.current.setFVGs([]);
           return;
       }
 
       const fvgs = calculateFVGs(allDataRef.current);
       fvgPrimitiveRef.current.setFVGs(fvgs);
-  }, [showFVG, calculateFVGs]);
+  }, [calculateFVGs]); // Removed showFVG dependency to keep function reference stable for WS
 
-  // Update FVGs when data changes or toggle changes
+  // Update FVGs when toggle changes
   useEffect(() => {
       updateFVGs();
   }, [updateFVGs, showFVG]); // Note: allDataRef is a ref, so it doesn't trigger effect. We need to call updateFVGs manually when data loads.
@@ -490,15 +615,10 @@ export default function Chart() {
           const markers = ordersData
               .filter(o => o.symbol === symbol && o.status === 'FILLED')
               .map(o => {
-                  const originalTime = new Date(o.created_at).getTime() / 1000;
-                  let interval = 3600; // Default 1h
-                  if (timeframe === '1m') interval = 60;
-                  else if (timeframe === '15m') interval = 15 * 60;
-                  else if (timeframe === '1h') interval = 60 * 60;
-                  else if (timeframe === '4h') interval = 4 * 60 * 60;
-                  else if (timeframe === '1d') interval = 24 * 60 * 60;
-                  
-                  // Normalize time to the start of the candle
+                  // Use updated_at for FILLED orders to show execution time, shifted to NY time
+                  const originalTime = toNySeconds(new Date(o.updated_at).getTime());
+                  const interval = timeframeToSeconds(timeframe);
+                  // Normalize time to the start of the candle for the current timeframe
                   const normalizedTime = Math.floor(originalTime / interval) * interval;
 
                   return {
@@ -839,10 +959,15 @@ export default function Chart() {
             labelVisible: true,
         },
       },
-      timeScale: {
-        timeVisible: true,
-        secondsVisible: false,
-      },
+            timeScale: {
+                timeVisible: true,
+                secondsVisible: false,
+            },
+            localization: {
+                locale: 'en-US',
+                timezone: TIMEZONE,
+                dateFormat: 'yyyy-MM-dd',
+            },
     });
     
     chartRef.current = chart;
@@ -874,6 +999,15 @@ export default function Chart() {
     const fvgPrimitive = new FVGPrimitive();
     newSeries.attachPrimitive(fvgPrimitive);
     fvgPrimitiveRef.current = fvgPrimitive;
+    
+    // Force FVG update if data exists (fixes initial load issue)
+    // Use a timeout to ensure state is settled?
+    setTimeout(() => {
+        if (allDataRef.current.length > 0 && showFVG && fvgPrimitiveRef.current) {
+            const fvgs = calculateFVGs(allDataRef.current);
+            fvgPrimitiveRef.current.setFVGs(fvgs);
+        }
+    }, 100);
 
     // Subscribe to crosshair move to capture mouse price
     chart.subscribeCrosshairMove((param) => {
@@ -920,15 +1054,20 @@ export default function Chart() {
         
         console.log(`Loaded ${data.length} candles`);
 
-        const cdata = data.map(d => ({
-          time: d[0] / 1000,
-          open: parseFloat(d[1]),
-          high: parseFloat(d[2]),
-          low: parseFloat(d[3]),
-          close: parseFloat(d[4]),
-        }));
+                const cdata = data.map(d => {
+                    const originalMs = d[0];
+                    const t = toNySeconds(originalMs);
+                    return {
+                        time: t,
+                        originalTimeMs: originalMs,
+                        open: parseFloat(d[1]),
+                        high: parseFloat(d[2]),
+                        low: parseFloat(d[3]),
+                        close: parseFloat(d[4]),
+                    };
+                });
 
-        // Dedup cdata internally
+        // Dedup cdata internally using NY-shifted time (chart key must be strictly increasing)
         const uniqueCData = [];
         const seenTimes = new Set();
         for (const item of cdata) {
@@ -943,7 +1082,7 @@ export default function Chart() {
         } else {
             if (endTime) {
                 // Prepend data
-                // Filter out duplicates based on time
+                // Filter out duplicates based on chart time key (NY shifted)
                 const existingTimes = new Set(allDataRef.current.map(d => d.time));
                 const uniqueNewData = uniqueCData.filter(d => !existingTimes.has(d.time));
                 
@@ -976,6 +1115,7 @@ export default function Chart() {
                 // Ensure visible range is set correctly for initial load
                 if (!endTime) {
                     chartRef.current.timeScale().fitContent();
+                    isChartReadyRef.current = true; // Mark chart as ready for WS updates
                 }
             }
             
@@ -986,8 +1126,15 @@ export default function Chart() {
             }
         }
 
-        // Update FVGs
-        updateFVGs();
+        // Update FVGs - use ref to get latest showFVG value
+        if (fvgPrimitiveRef.current) {
+            if (showFVGRef.current) {
+                const fvgs = calculateFVGs(allDataRef.current);
+                fvgPrimitiveRef.current.setFVGs(fvgs);
+            } else {
+                fvgPrimitiveRef.current.setFVGs([]);
+            }
+        }
 
         // Initial overlay update (only on first load)
         if (!endTime && !isDisposed) {
@@ -1017,9 +1164,9 @@ export default function Chart() {
             if (range && range.from < 10 && !isLoadingRef.current && hasMoreRef.current) {
                  const firstData = allDataRef.current[0];
                  if (firstData) {
-                     // Binance API expects milliseconds for endTime
-                     // We want data BEFORE this candle.
-                     loadData(firstData.time * 1000 - 1);
+                     // Binance API expects milliseconds for endTime (exchange time)
+                     // Use originalTimeMs to request data before the earliest candle we have.
+                     loadData(firstData.originalTimeMs - 1);
                  }
             }
         }, 200); // Check every 200ms
@@ -1041,6 +1188,9 @@ export default function Chart() {
 
         ws.onmessage = (event) => {
           if (isDisposed) return;
+          // Prevent WS updates before initial history is loaded
+          if (!isChartReadyRef.current) return;
+
           try {
             const message = JSON.parse(event.data);
             if (!message.k) return;
@@ -1056,13 +1206,14 @@ export default function Chart() {
                 return;
             }
 
-            const candle = {
-              time: kline.t / 1000,
-              open: open,
-              high: high,
-              low: low,
-              close: close,
-            };
+                        const candle = {
+                            time: toNySeconds(kline.t),
+                            originalTimeMs: kline.t,
+                            open: open,
+                            high: high,
+                            low: low,
+                            close: close,
+                        };
             
             // Update Price Display
             if (lastPriceRef.current) {
@@ -1084,8 +1235,10 @@ export default function Chart() {
                 const lastData = allDataRef.current[allDataRef.current.length - 1];
                 if (lastData && lastData.time === candle.time) {
                     allDataRef.current[allDataRef.current.length - 1] = candle;
-                } else {
+                } else if (!lastData || candle.time > lastData.time) {
                     allDataRef.current.push(candle);
+                } else {
+                    // Out-of-order WS update; ignore to keep ascending time
                 }
                 
                 // Throttle FVG updates? Or just update.
@@ -1195,10 +1348,12 @@ export default function Chart() {
       markersPrimitiveRef.current = null;
       countdownPrimitiveRef.current = null;
       drawingsPrimitiveRef.current = null;
+      fvgPrimitiveRef.current = null;
       chartRef.current = null;
       
       // Reset loading state to allow new fetches on remount
       isLoadingRef.current = false;
+      isChartReadyRef.current = false;
       
       // Clear labels
       if (labelsContainerRef.current) {
@@ -1217,7 +1372,7 @@ export default function Chart() {
             </div>
 
             <div className="flex border rounded shadow-sm overflow-hidden">
-              {['1m', '15m', '1h', '4h', '1d'].map((tf) => (
+              {['1m', '5m', '15m', '1h', '4h', '1d', '1w'].map((tf) => (
                 <button
                   key={tf}
                   onClick={() => setTimeframe(tf)}
@@ -1387,6 +1542,26 @@ export default function Chart() {
                                     className="w-full h-8 p-0 border-0"
                                 />
                             </div>
+                            <div className="col-span-2 flex items-center gap-2 mt-2">
+                                <input 
+                                    type="checkbox" 
+                                    checked={chartOptions.borderVisible}
+                                    onChange={(e) => setChartOptions({...chartOptions, borderVisible: e.target.checked})}
+                                    className="h-4 w-4"
+                                />
+                                <label className="text-xs text-gray-500">Show Border</label>
+                            </div>
+                            {chartOptions.borderVisible && (
+                                <div className="col-span-2">
+                                    <label className="block text-xs text-gray-500 mb-1">Border Color</label>
+                                    <input 
+                                        type="color" 
+                                        value={chartOptions.borderColor}
+                                        onChange={(e) => setChartOptions({...chartOptions, borderColor: e.target.value})}
+                                        className="w-full h-8 p-0 border-0"
+                                    />
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

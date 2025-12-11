@@ -337,7 +337,8 @@ async def get_account_statistics(account_id: int, days: float = None, db: AsyncS
 
 @router.patch("/{account_id}", response_model=AccountResponse)
 async def update_account(account_id: int, update_data: AccountUpdate, db: AsyncSession = Depends(get_db)):
-    stmt = select(Account).where(Account.id == account_id)
+    # Eager-load positions to avoid async lazy-load inside calculate_account_metrics
+    stmt = select(Account).options(selectinload(Account.positions)).where(Account.id == account_id)
     result = await db.execute(stmt)
     account = result.scalar_one_or_none()
     
@@ -350,6 +351,8 @@ async def update_account(account_id: int, update_data: AccountUpdate, db: AsyncS
         account.last_timeframe = update_data.last_timeframe
     if update_data.last_quantity is not None:
         account.last_quantity = update_data.last_quantity
+    if update_data.chart_settings is not None:
+        account.chart_settings = update_data.chart_settings
         
     await db.commit()
     await db.refresh(account)

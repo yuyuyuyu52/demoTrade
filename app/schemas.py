@@ -82,6 +82,7 @@ class AccountResponse(BaseModel):
     leverage: int
     last_timeframe: Optional[str] = "1h"
     last_quantity: Optional[float] = 0.01
+    chart_settings: Optional[dict] = {}
     equity: Optional[float] = 0.0
     unrealized_pnl: Optional[float] = 0.0
     positions: List[PositionResponse] = []
@@ -93,6 +94,7 @@ class AccountUpdate(BaseModel):
     leverage: Optional[int] = None
     last_timeframe: Optional[str] = None
     last_quantity: Optional[float] = None
+    chart_settings: Optional[dict] = None
 
 class AccountStatistics(BaseModel):
     max_drawdown: float

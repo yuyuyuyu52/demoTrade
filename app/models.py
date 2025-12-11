@@ -31,6 +31,7 @@ class Account(Base):
     leverage: Mapped[int] = mapped_column(Integer, default=20)
     last_timeframe: Mapped[str] = mapped_column(String, default="1h")
     last_quantity: Mapped[float] = mapped_column(Float, default=0.01)
+    chart_settings: Mapped[dict] = mapped_column(JSON, default={})
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
 

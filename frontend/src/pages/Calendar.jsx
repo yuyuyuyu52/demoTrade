@@ -66,6 +66,22 @@ export default function Calendar() {
       res.data.forEach(item => {
         pnlMap[item.date] = item.pnl;
       });
+
+      // Pre-fill every day in range with 0 so missing days show 0
+      const iter = new Date(startDate);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      while (iter <= endDate) {
+        const y = iter.getFullYear();
+        const m = String(iter.getMonth() + 1).padStart(2, '0');
+        const d = String(iter.getDate()).padStart(2, '0');
+        const key = `${y}-${m}-${d}`;
+        // Only backfill days up to today; future days stay empty
+        if (!(key in pnlMap) && iter <= today) {
+          pnlMap[key] = 0;
+        }
+        iter.setDate(iter.getDate() + 1);
+      }
       setDailyPnl(pnlMap);
 
       // Calculate Monthly PNL (only for days in the current month)

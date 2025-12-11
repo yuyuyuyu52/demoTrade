@@ -1,4 +1,37 @@
 
+const TIMEZONE = 'America/New_York';
+
+const getTzOffsetSeconds = (ms, timeZone = TIMEZONE) => {
+    const dtf = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        hour12: false,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+    });
+
+    const parts = dtf.formatToParts(new Date(ms));
+    const filled = {};
+    for (const { type, value } of parts) {
+        filled[type] = value;
+    }
+    const asUTC = Date.UTC(
+        Number(filled.year),
+        Number(filled.month) - 1,
+        Number(filled.day),
+        Number(filled.hour),
+        Number(filled.minute),
+        Number(filled.second),
+    );
+
+    return (asUTC - ms) / 1000;
+};
+
+const toNySeconds = (ms) => Math.round(ms / 1000 + getTzOffsetSeconds(ms, TIMEZONE));
+
 export class CountdownPrimitive {
     constructor(options) {
         this._options = options || {};
@@ -76,7 +109,8 @@ export class CountdownPrimitive {
                     else if (tf === '1w') intervalSeconds = 7 * 24 * 60 * 60;
                     else if (tf === '1M') intervalSeconds = 30 * 24 * 60 * 60;
                     
-                    const now = Math.floor(Date.now() / 1000);
+                    // Use New York time for countdown to align with chart timestamps
+                    const now = toNySeconds(Date.now());
                     const nextBarTime = lastBar.time + intervalSeconds;
                     let remaining = nextBarTime - now;
                     
