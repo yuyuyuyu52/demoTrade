@@ -1036,7 +1036,67 @@ export default function Chart() {
                     price = snapToOHLC(time, price, e.metaKey || e.ctrlKey);
 
                     if (!currentDrawingRef.current) {
-                        // First Click: Start Drawing
+                        // Special Case: Long/Short Tools (Single Click Creation)
+                        if (activeTool === 'long' || activeTool === 'short') {
+                            const tempId = `temp_${Date.now()}_${Math.random()}`;
+
+                            // Calculate default Width (Time)
+                            // Use ~60px width or ~5 candles
+                            let endTime = getTimeFromCoordinate(mouseX + 50);
+                            if (endTime === null) endTime = time; // Fallback
+
+                            // Calculate default SL/TP (Price)
+                            const pricePx = seriesRef.current.priceToCoordinate(price);
+                            let slPrice, tpPrice;
+
+                            if (activeTool === 'long') {
+                                const slPx = pricePx + 40; // 40px down
+                                const tpPx = pricePx - 80; // 80px up
+                                slPrice = seriesRef.current.coordinateToPrice(slPx);
+                                tpPrice = seriesRef.current.coordinateToPrice(tpPx);
+                            } else {
+                                const slPx = pricePx - 40; // 40px up
+                                const tpPx = pricePx + 80; // 80px down
+                                slPrice = seriesRef.current.coordinateToPrice(slPx);
+                                tpPrice = seriesRef.current.coordinateToPrice(tpPx);
+                            }
+
+                            // Fallback if price conversion excluded (e.g. out of view)
+                            // Use 1% SL, 2% TP as fallback
+                            if (slPrice === null) slPrice = activeTool === 'long' ? price * 0.99 : price * 1.01;
+                            if (tpPrice === null) tpPrice = activeTool === 'long' ? price * 1.02 : price * 0.98;
+
+                            const newDrawing = {
+                                type: activeTool,
+                                id: tempId,
+                                p1: { time, price },
+                                p2: { time: endTime, price: slPrice },
+                                p3: { time: endTime, price: tpPrice }
+                            };
+
+                            // Add to state immediately
+                            const updatedDrawings = [...drawingsRef.current, newDrawing];
+                            drawingsRef.current = updatedDrawings;
+                            setDrawings(updatedDrawings);
+                            if (drawingsPrimitiveRef.current) {
+                                drawingsPrimitiveRef.current.setDrawings(updatedDrawings);
+                            }
+
+                            // Select it
+                            selectedDrawingIdRef.current = tempId;
+                            setSelectedDrawingId(tempId);
+                            if (drawingsPrimitiveRef.current) {
+                                drawingsPrimitiveRef.current.setSelectedId(tempId);
+                            }
+
+                            // Save
+                            saveDrawing(newDrawing);
+
+                            setActiveTool('cursor');
+                            return;
+                        }
+
+                        // First Click: Start Drawing (Standard)
                         currentDrawingRef.current = {
                             type: activeTool,
                             p1: { time, price },
