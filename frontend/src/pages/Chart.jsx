@@ -88,6 +88,7 @@ export default function Chart() {
     const selectedDrawingIdRef = useRef(null); // Ref for selected ID
     const currentDrawingRef = useRef(null);
     const dragStateRef = useRef(null);
+    const filledOrdersRef = useRef([]); // Store filled orders for click interaction
 
     // Sync refs with state
     useEffect(() => {
@@ -802,9 +803,16 @@ export default function Chart() {
                                 position: o.side === 'BUY' ? 'belowBar' : 'aboveBar',
                                 color: o.side === 'BUY' ? '#2196F3' : '#E91E63',
                                 shape: o.side === 'BUY' ? 'arrowUp' : 'arrowDown',
-                                text: `${o.quantity} @ ${o.price}`
+                                text: '',
+                                originalPrice: parseFloat(o.price),
+                                side: o.side,
+                                quantity: o.quantity,
+                                id: o.id
                             };
                         });
+
+                    // Store markers in ref for click detection
+                    filledOrdersRef.current = markers;
 
                     // Sort markers by time
                     markers.sort((a, b) => a.time - b.time);
@@ -1071,6 +1079,79 @@ export default function Chart() {
                     }
                 }
                 return;
+            }
+
+            // Check for Marker Click (Filled Orders) - cursor mode only
+            if (activeTool === 'cursor') {
+                const timeScale = chartRef.current.timeScale();
+                const clickedTime = timeScale.coordinateToTime(mouseX);
+
+                if (clickedTime !== null && filledOrdersRef.current && filledOrdersRef.current.length > 0) {
+                    // Find marker at this time (allow some tolerance)
+                    const clickedMarker = filledOrdersRef.current.find(marker => {
+                        const markerX = timeScale.timeToCoordinate(marker.time);
+                        if (markerX === null) return false;
+
+                        // Check horizontal distance
+                        if (Math.abs(markerX - mouseX) >= 15) return false;
+
+                        // Check vertical distance
+                        // Find the candle for this marker to know High/Low
+                        const candle = allDataRef.current.find(c => c.time === marker.time);
+                        if (!candle) return false;
+
+                        let markerY;
+                        if (marker.position === 'aboveBar') {
+                            const highCoord = seriesRef.current.priceToCoordinate(candle.high);
+                            if (highCoord === null) return false;
+                            // Marker is above High (lower Y value). Estimate center ~30px above.
+                            markerY = highCoord - 30;
+                        } else {
+                            // belowBar
+                            const lowCoord = seriesRef.current.priceToCoordinate(candle.low);
+                            if (lowCoord === null) return false;
+                            // Marker is below Low (higher Y value). Estimate center ~30px below.
+                            markerY = lowCoord + 30;
+                        }
+
+                        // Check vertical distance with tolerance
+                        return Math.abs(markerY - mouseY) < 30;
+                    });
+
+                    if (clickedMarker) {
+                        // Toggle price line for this marker
+                        const historyLineId = `history_${clickedMarker.id}`;
+                        const existingLine = priceLinesRef.current.find(
+                            item => item.draggableInfo && item.draggableInfo.id === historyLineId
+                        );
+
+                        if (existingLine) {
+                            // Remove existing line
+                            if (seriesRef.current) {
+                                try {
+                                    seriesRef.current.removePriceLine(existingLine.line);
+                                } catch (e) {
+                                    // ignore
+                                }
+                            }
+                            if (existingLine.labelElement) {
+                                existingLine.labelElement.remove();
+                            }
+                            priceLinesRef.current = priceLinesRef.current.filter(item => item !== existingLine);
+                        } else {
+                            // Create new price line WITHOUT text label
+                            const color = clickedMarker.color;
+                            addPriceLine(
+                                clickedMarker.originalPrice,
+                                '', // Empty title - no text
+                                color,
+                                LineStyle.Dashed,
+                                { type: 'HISTORY', id: historyLineId }
+                            );
+                        }
+                        return; // Stop processing other clicks
+                    }
+                }
             }
 
             // If already dragging/placing, don't select another line
