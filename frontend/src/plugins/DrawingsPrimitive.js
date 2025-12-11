@@ -11,6 +11,7 @@ class DrawingsPaneRenderer {
     _getClosestTimeCoordinate(timeScale, targetTime) {
         if (targetTime === undefined || targetTime === null) return null;
 
+        // 1. Try direct conversion
         try {
             const coord = timeScale.timeToCoordinate(targetTime);
             if (coord !== null) return coord;
@@ -18,7 +19,40 @@ class DrawingsPaneRenderer {
             // Continue to fallback
         }
 
-        // Fallback: Find closest bar
+        // 2. Extrapolate for future time
+        try {
+            const data = this._series.data();
+            if (data && data.length >= 2) {
+                const lastBar = data[data.length - 1];
+                const lastTime = Number(lastBar.time);
+                const tTime = Number(targetTime);
+
+                if (tTime > lastTime) {
+                    const prevBar = data[data.length - 2];
+                    const prevTime = Number(prevBar.time);
+                    const interval = lastTime - prevTime;
+
+                    if (interval > 0) {
+                        const diffBars = (tTime - lastTime) / interval;
+                        
+                        // Get last bar's logical index
+                        const lastBarCoord = timeScale.timeToCoordinate(lastBar.time);
+                        if (lastBarCoord !== null) {
+                            const lastBarLogical = timeScale.coordinateToLogical(lastBarCoord);
+                            if (lastBarLogical !== null) {
+                                const targetLogical = lastBarLogical + diffBars;
+                                const targetCoord = timeScale.logicalToCoordinate(targetLogical);
+                                if (targetCoord !== null) return targetCoord;
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            // Ignore errors and fall through
+        }
+
+        // 3. Fallback: Find closest bar (for past times or if extrapolation fails)
         // Note: accessing data() might be expensive if called frequently. 
         // Ideally we should cache this or optimize.
         try {

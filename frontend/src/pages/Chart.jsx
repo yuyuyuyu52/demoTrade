@@ -730,6 +730,41 @@ export default function Chart() {
       const container = chartContainerRef.current;
       if (!container) return;
 
+      // Helper to get time from coordinate (handling future/whitespace)
+      const getTimeFromCoordinate = (x) => {
+          if (!chartRef.current || !seriesRef.current) return null;
+          const timeScale = chartRef.current.timeScale();
+          
+          // 1. Try direct conversion
+          const time = timeScale.coordinateToTime(x);
+          if (time !== null) return time;
+
+          // 2. Extrapolate for future time
+          const logical = timeScale.coordinateToLogical(x);
+          if (logical === null) return null;
+
+          const data = seriesRef.current.data();
+          if (!data || data.length < 2) return null;
+
+          const lastBar = data[data.length - 1];
+          const prevBar = data[data.length - 2];
+          
+          const lastTime = Number(lastBar.time);
+          const prevTime = Number(prevBar.time);
+          const interval = lastTime - prevTime; 
+          
+          if (interval <= 0) return null;
+
+          const lastBarCoord = timeScale.timeToCoordinate(lastBar.time);
+          if (lastBarCoord === null) return null;
+          
+          const lastBarLogical = timeScale.coordinateToLogical(lastBarCoord);
+          if (lastBarLogical === null) return null;
+          
+          const diff = logical - lastBarLogical;
+          return lastTime + (diff * interval);
+      };
+
       const handleMouseDown = (e) => {
           if (!seriesRef.current || !chartRef.current) return;
           
@@ -740,7 +775,7 @@ export default function Chart() {
               const y = e.clientY - rect.top;
               
               const price = seriesRef.current.coordinateToPrice(y);
-              const time = chartRef.current.timeScale().coordinateToTime(x);
+              const time = getTimeFromCoordinate(x);
               
               if (price !== null && time !== null) {
                   if (!currentDrawingRef.current) {
@@ -831,7 +866,7 @@ export default function Chart() {
           // Drawing Logic
           if (currentDrawingRef.current) {
               const price = seriesRef.current.coordinateToPrice(y);
-              const time = chartRef.current.timeScale().coordinateToTime(x);
+              const time = getTimeFromCoordinate(x);
               
               if (price !== null && time !== null) {
                   currentDrawingRef.current.p2 = { time, price };
