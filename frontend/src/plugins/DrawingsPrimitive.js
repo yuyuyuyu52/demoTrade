@@ -2,10 +2,11 @@
 import { LineStyle } from 'lightweight-charts';
 
 class DrawingsPaneRenderer {
-    constructor(drawings, series, chart) {
+    constructor(drawings, series, chart, selectedId) {
         this._drawings = drawings;
         this._series = series;
         this._chart = chart;
+        this._selectedId = selectedId;
     }
 
     _getClosestTimeCoordinate(timeScale, targetTime) {
@@ -133,6 +134,10 @@ class DrawingsPaneRenderer {
                     this._drawPosition(ctx, x1, y1, x2, y2, 'short');
                 }
 
+                if (d.id === this._selectedId) {
+                    this._drawAnchors(ctx, x1, y1, x2, y2, d.type);
+                }
+
                 ctx.restore();
             });
             
@@ -244,12 +249,30 @@ class DrawingsPaneRenderer {
         ctx.stroke();
         
         // Draw Labels
-        ctx.font = '10px sans-serif';
-        ctx.fillStyle = '#FF5252';
-        ctx.fillText('Stop', x2 + 5, y2);
-        
         ctx.fillStyle = '#00E676';
         ctx.fillText('Target', x2 + 5, targetY);
+    }
+
+    _drawAnchors(ctx, x1, y1, x2, y2, type) {
+        const radius = 6;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.strokeStyle = '#2962FF';
+        ctx.lineWidth = 2;
+
+        const drawPoint = (x, y) => {
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.stroke();
+        };
+
+        drawPoint(x1, y1);
+        drawPoint(x2, y2);
+        
+        if (type === 'rect' || type === 'long' || type === 'short') {
+             drawPoint(x1, y2);
+             drawPoint(x2, y1);
+        }
     }
 }
 
@@ -258,6 +281,7 @@ export class DrawingsPrimitive {
         this._drawings = [];
         this._series = null;
         this._chart = null;
+        this._selectedId = null;
         this._requestUpdate = () => {};
     }
 
@@ -278,10 +302,15 @@ export class DrawingsPrimitive {
         this._requestUpdate();
     }
 
+    setSelectedId(id) {
+        this._selectedId = id;
+        this._requestUpdate();
+    }
+
     paneViews() {
         if (!this._series || !this._chart) return [];
         return [{
-            renderer: () => new DrawingsPaneRenderer(this._drawings, this._series, this._chart),
+            renderer: () => new DrawingsPaneRenderer(this._drawings, this._series, this._chart, this._selectedId),
         }];
     }
 }

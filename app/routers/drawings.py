@@ -41,8 +41,23 @@ async def delete_drawing(drawing_id: int, db: AsyncSession = Depends(get_db)):
     db_drawing = result.scalar_one_or_none()
     
     if not db_drawing:
-        raise HTTPException(status_code=404, description="Drawing not found")
+        raise HTTPException(status_code=404, detail="Drawing not found")
     
     await db.delete(db_drawing)
     await db.commit()
     return {"ok": True}
+
+@router.put("/{drawing_id}", response_model=schemas.DrawingResponse)
+async def update_drawing(drawing_id: int, drawing_update: schemas.DrawingUpdate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(models.Drawing).filter(models.Drawing.id == drawing_id))
+    db_drawing = result.scalar_one_or_none()
+    
+    if not db_drawing:
+        raise HTTPException(status_code=404, detail="Drawing not found")
+    
+    if drawing_update.data:
+        db_drawing.data = drawing_update.data
+    
+    await db.commit()
+    await db.refresh(db_drawing)
+    return db_drawing

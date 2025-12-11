@@ -83,7 +83,20 @@ export default function Chart() {
   // Drawing Tools State
   const [activeTool, setActiveTool] = useState('cursor'); // cursor, line, rect, fib, long, short
   const [drawings, setDrawings] = useState([]);
+  const drawingsRef = useRef([]); // Ref to keep track of latest drawings for event handlers
+  const [selectedDrawingId, setSelectedDrawingId] = useState(null);
+  const selectedDrawingIdRef = useRef(null); // Ref for selected ID
   const currentDrawingRef = useRef(null);
+  const dragStateRef = useRef(null);
+
+  // Sync refs with state
+  useEffect(() => {
+      drawingsRef.current = drawings;
+  }, [drawings]);
+
+  useEffect(() => {
+      selectedDrawingIdRef.current = selectedDrawingId;
+  }, [selectedDrawingId]);
 
   // Chart Settings
   const [showSettings, setShowSettings] = useState(false);
@@ -330,18 +343,181 @@ export default function Chart() {
           });
           if (res.ok) {
               const saved = await res.json();
-              setDrawings(prev => {
-                  return prev.map(d => {
-                      if (d === drawing) {
-                          return { ...d, id: saved.id };
-                      }
-                      return d;
-                  });
+              const tempId = drawing.id;
+              
+              console.log('DEBUG: Replacing temp ID', tempId, 'with real ID', saved.id);
+              
+              // Replace temp ID with real ID from backend
+              const updatedDrawings = drawingsRef.current.map(d => {
+                  if (d.id === tempId) {
+                      return { ...d, id: saved.id };
+                  }
+                  return d;
               });
+              drawingsRef.current = updatedDrawings;
+              setDrawings(updatedDrawings);
+              
+              if (drawingsPrimitiveRef.current) {
+                  drawingsPrimitiveRef.current.setDrawings(updatedDrawings);
+              }
+              
+              // Update selected ID if this drawing was selected
+              if (selectedDrawingIdRef.current === tempId) {
+                  console.log('DEBUG: Updating selectedId from', tempId, 'to', saved.id);
+                  selectedDrawingIdRef.current = saved.id;
+                  setSelectedDrawingId(saved.id);
+                  if (drawingsPrimitiveRef.current) {
+                      drawingsPrimitiveRef.current.setSelectedId(saved.id);
+                  }
+              }
           }
       } catch (err) {
           console.error("Failed to save drawing", err);
       }
+  };
+
+  const updateDrawing = async (drawing) => {
+      if (!user || !drawing.id) return;
+      // Skip API call if it's a temp ID (not saved yet)
+      if (String(drawing.id).startsWith('temp_')) return;
+      
+      try {
+          const payload = {
+              data: { p1: drawing.p1, p2: drawing.p2 }
+          };
+          await fetch(`/api/drawings/${drawing.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+          });
+      } catch (err) {
+          console.error("Failed to update drawing", err);
+      }
+  };
+
+  const deleteDrawing = async (id) => {
+      if (!user || !id) return;
+      // Skip API call if it's a temp ID (not saved yet)
+      if (String(id).startsWith('temp_')) return;
+      
+      try {
+          await fetch(`/api/drawings/${id}`, {
+              method: 'DELETE'
+          });
+      } catch (err) {
+          console.error("Failed to delete drawing", err);
+      }
+  };
+
+  const pointToLineDistance = (x, y, x1, y1, x2, y2) => {
+      const A = x - x1;
+      const B = y - y1;
+      const C = x2 - x1;
+      const D = y2 - y1;
+
+      const dot = A * C + B * D;
+      const len_sq = C * C + D * D;
+      let param = -1;
+      if (len_sq !== 0) param = dot / len_sq;
+
+      let xx, yy;
+
+      if (param < 0) {
+          xx = x1;
+          yy = y1;
+      } else if (param > 1) {
+          xx = x2;
+          yy = y2;
+      } else {
+          xx = x1 + param * C;
+          yy = y1 + param * D;
+      }
+
+      const dx = x - xx;
+      const dy = y - yy;
+      return Math.sqrt(dx * dx + dy * dy);
+  };
+
+  const getCoordinate = (time, price) => {
+      if (!chartRef.current || !seriesRef.current) return null;
+      if (time === null || time === undefined) return null;
+      
+      const timeScale = chartRef.current.timeScale();
+      let x = null;
+      
+      // 1. Try direct conversion
+      try {
+          x = timeScale.timeToCoordinate(time);
+      } catch (e) {
+          x = null;
+      }
+
+      // 2. Extrapolate if null (e.g. future time)
+      if (x === null && allDataRef.current && allDataRef.current.length >= 2) {
+          try {
+              const data = allDataRef.current;
+              const lastBar = data[data.length - 1];
+              const lastTime = Number(lastBar.time);
+              const tTime = Number(time);
+
+              if (tTime > lastTime) {
+                  const prevBar = data[data.length - 2];
+                  const prevTime = Number(prevBar.time);
+                  const interval = lastTime - prevTime;
+
+                  if (interval > 0) {
+                      const diffBars = (tTime - lastTime) / interval;
+                      
+                      const lastBarCoord = timeScale.timeToCoordinate(lastBar.time);
+                      if (lastBarCoord !== null) {
+                          const lastBarLogical = timeScale.coordinateToLogical(lastBarCoord);
+                          if (lastBarLogical !== null) {
+                              const targetLogical = lastBarLogical + diffBars;
+                              const targetCoord = timeScale.logicalToCoordinate(targetLogical);
+                              if (targetCoord !== null) {
+                                  x = targetCoord;
+                              }
+                          }
+                      }
+                  }
+              } else {
+                  // Time is in the past but timeToCoordinate failed (maybe zoomed in/out or not exact bar)
+                  // Try to find closest bar
+                  // Binary search
+                  let left = 0;
+                  let right = data.length - 1;
+                  let closest = data[0];
+                  let minDiff = Math.abs(data[0].time - tTime);
+
+                  while (left <= right) {
+                      const mid = Math.floor((left + right) / 2);
+                      const item = data[mid];
+                      const diff = Math.abs(item.time - tTime);
+
+                      if (diff < minDiff) {
+                          minDiff = diff;
+                          closest = item;
+                      }
+
+                      if (item.time < tTime) {
+                          left = mid + 1;
+                      } else if (item.time > tTime) {
+                          right = mid - 1;
+                      } else {
+                          closest = item;
+                          break;
+                      }
+                  }
+                  x = timeScale.timeToCoordinate(closest.time);
+              }
+          } catch (e) {
+              console.error("Error extrapolating coordinate", e);
+          }
+      }
+
+      const y = seriesRef.current.priceToCoordinate(price);
+      if (x === null || y === null) return null;
+      return { x, y };
   };
 
   // Helper to clear all price lines and labels
@@ -648,6 +824,32 @@ export default function Chart() {
     }
   }, [user, symbol, timeframe]);
 
+  // Handle Delete Key for Drawings
+  useEffect(() => {
+      const handleKeyDown = (e) => {
+          if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDrawingId) {
+              const drawing = drawings.find(d => d.id === selectedDrawingId);
+              if (drawing) {
+                  deleteDrawing(drawing.id);
+                  setDrawings(prev => {
+                      const updated = prev.filter(d => d.id !== selectedDrawingId);
+                      if (drawingsPrimitiveRef.current) {
+                          drawingsPrimitiveRef.current.setDrawings(updated);
+                      }
+                      return updated;
+                  });
+                  setSelectedDrawingId(null);
+                  if (drawingsPrimitiveRef.current) {
+                      drawingsPrimitiveRef.current.setSelectedId(null);
+                  }
+              }
+          }
+      };
+      
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedDrawingId, drawings]);
+
   // Keyboard Shortcuts for Trading
   useEffect(() => {
     const placeOrder = async (side, type) => {
@@ -768,14 +970,14 @@ export default function Chart() {
       const handleMouseDown = (e) => {
           if (!seriesRef.current || !chartRef.current) return;
           
+          const rect = container.getBoundingClientRect();
+          const mouseX = e.clientX - rect.left;
+          const mouseY = e.clientY - rect.top;
+
           // Drawing Logic
           if (activeTool !== 'cursor') {
-              const rect = container.getBoundingClientRect();
-              const x = e.clientX - rect.left;
-              const y = e.clientY - rect.top;
-              
-              const price = seriesRef.current.coordinateToPrice(y);
-              const time = getTimeFromCoordinate(x);
+              const price = seriesRef.current.coordinateToPrice(mouseY);
+              const time = getTimeFromCoordinate(mouseX);
               
               if (price !== null && time !== null) {
                   if (!currentDrawingRef.current) {
@@ -789,21 +991,31 @@ export default function Chart() {
                       chartRef.current.applyOptions({ handleScroll: false, handleScale: false });
                   } else {
                       // Second Click: Finish Drawing
+                      const tempId = `temp_${Date.now()}_${Math.random()}`;
                       const newDrawing = {
                           ...currentDrawingRef.current,
+                          id: tempId,
                           p2: { time, price }
                       };
                       
-                      // Save to Backend
+                      // Add to state immediately with temp ID
+                      const updatedDrawings = [...drawingsRef.current, newDrawing];
+                      drawingsRef.current = updatedDrawings; // Sync ref immediately
+                      setDrawings(updatedDrawings);
+                      if (drawingsPrimitiveRef.current) {
+                          drawingsPrimitiveRef.current.setDrawings(updatedDrawings);
+                      }
+                      
+                      // Auto-select the newly created drawing
+                      console.log('DEBUG: Auto-selecting new drawing', tempId);
+                      selectedDrawingIdRef.current = tempId;
+                      setSelectedDrawingId(tempId);
+                      if (drawingsPrimitiveRef.current) {
+                          drawingsPrimitiveRef.current.setSelectedId(tempId);
+                      }
+                      
+                      // Save to Backend (async)
                       saveDrawing(newDrawing);
-
-                      setDrawings(prev => {
-                          const updated = [...prev, newDrawing];
-                          if (drawingsPrimitiveRef.current) {
-                              drawingsPrimitiveRef.current.setDrawings(updated);
-                          }
-                          return updated;
-                      });
                       
                       currentDrawingRef.current = null;
                       setActiveTool('cursor'); // Reset tool
@@ -818,12 +1030,99 @@ export default function Chart() {
           // If already dragging/placing, don't select another line
           if (draggingLineRef.current) return;
 
-          const rect = container.getBoundingClientRect();
-          const y = e.clientY - rect.top;
+          // Check for Anchor click first (if selected)
+          if (selectedDrawingIdRef.current) {
+              const drawing = drawingsRef.current.find(d => d.id === selectedDrawingIdRef.current);
+              if (drawing) {
+                  const p1 = getCoordinate(drawing.p1.time, drawing.p1.price);
+                  const p2 = getCoordinate(drawing.p2.time, drawing.p2.price);
+                  
+                  if (p1 && p2) {
+                      const anchors = [
+                          { x: p1.x, y: p1.y, idx: 0 }, // p1
+                          { x: p2.x, y: p2.y, idx: 1 }, // p2
+                      ];
+                      
+                      if (['rect', 'long', 'short'].includes(drawing.type)) {
+                          anchors.push({ x: p1.x, y: p2.y, idx: 2 }); // bottom-left / top-right
+                          anchors.push({ x: p2.x, y: p1.y, idx: 3 }); // top-left / bottom-right
+                      }
+                      
+                      for (const anchor of anchors) {
+                          const dist = Math.hypot(mouseX - anchor.x, mouseY - anchor.y);
+                          if (dist < 10) {
+                              dragStateRef.current = {
+                                  drawingId: drawing.id,
+                                  pointIndex: anchor.idx,
+                              };
+                              chartRef.current.applyOptions({ handleScroll: false, handleScale: false });
+                              return;
+                          }
+                      }
+                  }
+              }
+          }
+
+          // Check for Drawing Body click
+          let closestDrawing = null;
+          let minDrawDiff = Infinity;
           
-          // Convert y to price
-          const price = seriesRef.current.coordinateToPrice(y);
-          if (price === null) return;
+          console.log('DEBUG: Checking', drawingsRef.current.length, 'drawings, activeTool=', activeTool);
+          drawingsRef.current.forEach(d => {
+              const p1 = getCoordinate(d.p1.time, d.p1.price);
+              const p2 = getCoordinate(d.p2.time, d.p2.price);
+              if (!p1 || !p2) return;
+              
+              let dist = Infinity;
+              
+              if (d.type === 'line' || d.type === 'fib') {
+                  dist = pointToLineDistance(mouseX, mouseY, p1.x, p1.y, p2.x, p2.y);
+              } else if (['rect', 'long', 'short'].includes(d.type)) {
+                  const minX = Math.min(p1.x, p2.x);
+                  const maxX = Math.max(p1.x, p2.x);
+                  const minY = Math.min(p1.y, p2.y);
+                  const maxY = Math.max(p1.y, p2.y);
+                  
+                  if (mouseX >= minX && mouseX <= maxX && mouseY >= minY && mouseY <= maxY) {
+                      dist = 0;
+                  } else {
+                      const dx = Math.max(minX - mouseX, 0, mouseX - maxX);
+                      const dy = Math.max(minY - mouseY, 0, mouseY - maxY);
+                      dist = Math.sqrt(dx*dx + dy*dy);
+                  }
+              }
+              
+              if (dist < 10) {
+                  if (dist < minDrawDiff) {
+                      minDrawDiff = dist;
+                      closestDrawing = d;
+                  }
+              }
+          });
+          
+          console.log('DEBUG: closestDrawing=', closestDrawing ? closestDrawing.id : 'none');
+          if (closestDrawing) {
+              console.log('DEBUG: Selecting drawing', closestDrawing.id);
+              setSelectedDrawingId(closestDrawing.id);
+              selectedDrawingIdRef.current = closestDrawing.id;
+              if (drawingsPrimitiveRef.current) {
+                  drawingsPrimitiveRef.current.setSelectedId(closestDrawing.id);
+              }
+              return;
+          }
+
+          // Price Line Logic (Existing)
+          const price = seriesRef.current.coordinateToPrice(mouseY);
+          if (price === null) {
+               // Clicked on empty space and no drawing hit
+               console.log('DEBUG: price is null, clearing selection');
+               setSelectedDrawingId(null);
+               selectedDrawingIdRef.current = null;
+               if (drawingsPrimitiveRef.current) {
+                   drawingsPrimitiveRef.current.setSelectedId(null);
+               }
+               return;
+          }
 
           // Find closest line
           let closestLine = null;
@@ -835,7 +1134,7 @@ export default function Chart() {
               const lineY = seriesRef.current.priceToCoordinate(item.price);
               if (lineY === null) return;
               
-              const diff = Math.abs(y - lineY);
+              const diff = Math.abs(mouseY - lineY);
               if (diff < 10) { // 10px threshold
                   if (diff < minDiff) {
                       minDiff = diff;
@@ -854,6 +1153,15 @@ export default function Chart() {
               // Disable chart scrolling
               chartRef.current.timeScale().applyOptions({ shiftVisibleRangeOnNewBar: false });
               chartRef.current.applyOptions({ handleScroll: false, handleScale: false });
+          } else {
+              // Clicked on chart but hit nothing (no drawing, no price line)
+              // Deselect drawing
+              console.log('DEBUG: no closestLine, clearing selection');
+              setSelectedDrawingId(null);
+              selectedDrawingIdRef.current = null;
+              if (drawingsPrimitiveRef.current) {
+                  drawingsPrimitiveRef.current.setSelectedId(null);
+              }
           }
       };
 
@@ -863,6 +1171,45 @@ export default function Chart() {
           const x = e.clientX - rect.left;
           const y = e.clientY - rect.top;
           
+          // Drawing Dragging
+          if (dragStateRef.current) {
+              const price = seriesRef.current.coordinateToPrice(y);
+              const time = getTimeFromCoordinate(x);
+              
+              if (price !== null && time !== null) {
+                  const { drawingId, pointIndex } = dragStateRef.current;
+                  
+                  setDrawings(prev => {
+                      const updated = prev.map(d => {
+                          if (d.id !== drawingId) return d;
+                          
+                          const newD = { ...d };
+                          const newPoint = { time, price };
+                          
+                          if (pointIndex === 0) { // p1
+                              newD.p1 = newPoint;
+                          } else if (pointIndex === 1) { // p2
+                              newD.p2 = newPoint;
+                          } else if (pointIndex === 2) { // x1, y2 -> modify p1.x, p2.y
+                              newD.p1 = { ...newD.p1, time: newPoint.time };
+                              newD.p2 = { ...newD.p2, price: newPoint.price };
+                          } else if (pointIndex === 3) { // x2, y1 -> modify p2.x, p1.y
+                              newD.p2 = { ...newD.p2, time: newPoint.time };
+                              newD.p1 = { ...newD.p1, price: newPoint.price };
+                          }
+                          
+                          return newD;
+                      });
+                      
+                      if (drawingsPrimitiveRef.current) {
+                          drawingsPrimitiveRef.current.setDrawings(updated);
+                      }
+                      return updated;
+                  });
+              }
+              return;
+          }
+
           // Drawing Logic
           if (currentDrawingRef.current) {
               const price = seriesRef.current.coordinateToPrice(y);
@@ -912,6 +1259,14 @@ export default function Chart() {
       };
 
       const handleMouseUp = async () => {
+          if (dragStateRef.current) {
+              const d = drawings.find(x => x.id === dragStateRef.current.drawingId);
+              if (d) updateDrawing(d);
+              
+              dragStateRef.current = null;
+              chartRef.current.applyOptions({ handleScroll: true, handleScale: true });
+          }
+
           // Drawing Logic handled in MouseDown (Two Clicks)
 
           const currentDraggingLine = draggingLineRef.current;
@@ -965,7 +1320,7 @@ export default function Chart() {
           container.removeEventListener('mousemove', handleMouseMove);
           window.removeEventListener('mouseup', handleMouseUp);
       };
-  }, [updateOverlayData, activeTool, drawings]); // Re-bind when activeTool or drawings change
+  }, [updateOverlayData, activeTool]); // 移除 drawings 和 selectedDrawingId 依赖
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -1498,10 +1853,19 @@ export default function Chart() {
                     <ArrowDownCircle size={18} />
                 </button>
                 <button 
-                    onClick={() => {
+                    onClick={async () => {
+                        // Delete all drawings from backend
+                        const drawingsToDelete = drawingsRef.current.filter(d => !String(d.id).startsWith('temp_'));
+                        await Promise.all(drawingsToDelete.map(d => deleteDrawing(d.id)));
+                        
+                        // Clear frontend state
+                        drawingsRef.current = [];
                         setDrawings([]);
+                        setSelectedDrawingId(null);
+                        selectedDrawingIdRef.current = null;
                         if (drawingsPrimitiveRef.current) {
                             drawingsPrimitiveRef.current.setDrawings([]);
+                            drawingsPrimitiveRef.current.setSelectedId(null);
                         }
                     }}
                     className="p-2 text-red-600 hover:bg-red-50"

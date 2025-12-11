@@ -122,6 +122,9 @@ class DrawingCreate(BaseModel):
     type: str
     data: dict
 
+class DrawingUpdate(BaseModel):
+    data: Optional[dict] = None
+
 class DrawingResponse(BaseModel):
     id: int
     account_id: int
