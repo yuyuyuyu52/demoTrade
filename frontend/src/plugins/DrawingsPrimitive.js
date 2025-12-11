@@ -35,7 +35,7 @@ class DrawingsPaneRenderer {
 
                     if (interval > 0) {
                         const diffBars = (tTime - lastTime) / interval;
-                        
+
                         // Get last bar's logical index
                         const lastBarCoord = timeScale.timeToCoordinate(lastBar.time);
                         if (lastBarCoord !== null) {
@@ -64,7 +64,7 @@ class DrawingsPaneRenderer {
             let left = 0;
             let right = data.length - 1;
             let closest = data[0];
-            
+
             // Handle potential object time (BusinessDay) vs Number (Timestamp) mismatch
             // Assuming we use timestamps (numbers)
             const tTime = Number(targetTime);
@@ -91,7 +91,7 @@ class DrawingsPaneRenderer {
                     return timeScale.timeToCoordinate(item.time);
                 }
             }
-            
+
             return timeScale.timeToCoordinate(closest.time);
         } catch (e) {
             return null;
@@ -102,14 +102,14 @@ class DrawingsPaneRenderer {
         target.useBitmapCoordinateSpace(scope => {
             const ctx = scope.context;
             const timeScale = this._chart.timeScale();
-            
+
             // Apply scaling for Retina/High-DPI displays
             const horizontalPixelRatio = scope.horizontalPixelRatio || 1;
             const verticalPixelRatio = scope.verticalPixelRatio || 1;
-            
+
             ctx.save();
             ctx.scale(horizontalPixelRatio, verticalPixelRatio);
-            
+
             this._drawings.forEach(d => {
                 if (!d.p1 || !d.p2) return;
 
@@ -121,7 +121,7 @@ class DrawingsPaneRenderer {
                 if (x1 === null || y1 === null || x2 === null || y2 === null) return;
 
                 ctx.save();
-                
+
                 if (d.type === 'line') {
                     this._drawLine(ctx, x1, y1, x2, y2);
                 } else if (d.type === 'rect') {
@@ -129,18 +129,18 @@ class DrawingsPaneRenderer {
                 } else if (d.type === 'fib') {
                     this._drawFib(ctx, x1, y1, x2, y2);
                 } else if (d.type === 'long') {
-                    this._drawPosition(ctx, x1, y1, x2, y2, 'long');
+                    this._drawPosition(ctx, x1, y1, x2, y2, 'long', d);
                 } else if (d.type === 'short') {
-                    this._drawPosition(ctx, x1, y1, x2, y2, 'short');
+                    this._drawPosition(ctx, x1, y1, x2, y2, 'short', d);
                 }
 
                 if (d.id === this._selectedId) {
-                    this._drawAnchors(ctx, x1, y1, x2, y2, d.type);
+                    this._drawAnchors(ctx, x1, y1, x2, y2, d);
                 }
 
                 ctx.restore();
             });
-            
+
             ctx.restore(); // Restore the scaling
         });
     }
@@ -188,11 +188,11 @@ class DrawingsPaneRenderer {
 
         levels.forEach(level => {
             const y = y1 + yDiff * level;
-            
+
             ctx.beginPath();
             ctx.moveTo(x1, y);
             ctx.lineTo(x2, y);
-            
+
             ctx.strokeStyle = colors[level] || '#2962FF';
             ctx.lineWidth = 1;
             ctx.stroke();
@@ -204,56 +204,115 @@ class DrawingsPaneRenderer {
         });
     }
 
-    _drawPosition(ctx, x1, y1, x2, y2, type) {
+    _drawPosition(ctx, x1, y1, x2, y2, type, d) {
         // x1, y1 is Entry
-        // x2, y2 is Stop Loss (visually)
-        
-        // We need to calculate Target based on Risk.
-        // Risk = |y2 - y1|
-        // Let's assume Reward = 2 * Risk
-        
-        const riskY = Math.abs(y2 - y1);
-        const rewardY = riskY * 2;
-        
-        // Determine direction based on type
-        // Long: SL should be below Entry (y2 > y1). Target above (y < y1).
-        // Short: SL should be above Entry (y2 < y1). Target below (y > y1).
-        
-        // However, we respect user's drag.
-        // If user drags SL, we calculate Target in opposite direction.
-        
-        const yDiff = y2 - y1;
-        const targetY = y1 - yDiff * 2;
-        
-        // Draw Stop Loss Box (Red)
-        ctx.fillStyle = 'rgba(255, 82, 82, 0.2)';
-        ctx.strokeStyle = '#FF5252';
-        ctx.beginPath();
-        ctx.rect(x1, y1, x2 - x1, y2 - y1);
-        ctx.fill();
-        ctx.stroke();
-        
-        // Draw Take Profit Box (Green)
-        ctx.fillStyle = 'rgba(0, 230, 118, 0.2)';
-        ctx.strokeStyle = '#00E676';
-        ctx.beginPath();
-        ctx.rect(x1, y1, x2 - x1, targetY - y1);
-        ctx.fill();
-        ctx.stroke();
-        
+        // Standard logic: x2 determines width (Time).
+        // If p3 and p4 exist, they determine Top/Bottom prices.
+
+        let topY, bottomY;
+
+        if (d.p3 && d.p4) {
+            const y3 = this._series.priceToCoordinate(d.p3.price);
+            const y4 = this._series.priceToCoordinate(d.p4.price);
+            // We need to determine which is top/bottom visually (screen coordinates)
+            // Y grows downwards. So lower Y value is higher on screen.
+            // p3 is "Top Height" (visually higher, lower Y value)
+            // p4 is "Bottom Height" (visually lower, higher Y value)
+
+            // However, let's just use the prices from p3/p4 directly
+            topY = Math.min(y3, y4); // Higher on screen
+            bottomY = Math.max(y3, y4); // Lower on screen
+
+            // Check if we need to swap based on type? 
+            // Actually, usually user drags them freely.
+            // But for coloring, we need to know which box is Profit/Loss.
+
+            // Re-evaluate from prices strictly:
+            // LONG: Profit is ABOVE entry (Price > EntryPrice). Loss is BELOW.
+            // On screen (Y): Profit Y < Entry Y. Loss Y > Entry Y.
+
+            // We just draw two boxes from y1 to Top and y1 to Bottom.
+            // We need to decide which is Green/Red.
+
+            const y3_price = d.p3.price;
+            const y4_price = d.p4.price;
+            const entryPrice = d.p1.price;
+
+            // We assume p3 handles the "Above" point and p4 handles "Below" point as per user description?
+            // Or we just calculate PnL zones based on where p3/p4 are relative to p1.
+
+            // Let's use flexible logic:
+            // Box 1: y1 to y3.
+            // Box 2: y1 to y4.
+            // If type == 'long':
+            //    Zone > entry is Green. Zone < entry is Red.
+            // If type == 'short':
+            //    Zone < entry is Green. Zone > entry is Red.
+
+            // Helper to draw box
+            const drawBox = (yStart, yEnd, isProfit) => {
+                if (Math.abs(yStart - yEnd) < 1) return;
+                ctx.beginPath();
+                ctx.rect(x1, Math.min(yStart, yEnd), x2 - x1, Math.abs(yStart - yEnd));
+                ctx.fillStyle = isProfit ? 'rgba(0, 230, 118, 0.2)' : 'rgba(255, 82, 82, 0.2)';
+                ctx.strokeStyle = isProfit ? '#00E676' : '#FF5252';
+                ctx.fill();
+                ctx.stroke();
+            };
+
+            // Draw p3 box
+            const isP3Profit = type === 'long' ? (y3_price > entryPrice) : (y3_price < entryPrice);
+            drawBox(y1, this._series.priceToCoordinate(y3_price), isP3Profit);
+
+            // Draw p4 box
+            const isP4Profit = type === 'long' ? (y4_price > entryPrice) : (y4_price < entryPrice);
+            drawBox(y1, this._series.priceToCoordinate(y4_price), isP4Profit);
+
+        } else {
+            // FALLBACK LEGACY LOGIC
+            // x1, y1 is Entry
+            // x2, y2 is Stop Loss (visually)
+
+            // Risk = |y2 - y1|
+            // Reward = 2 * Risk
+
+            const riskY = Math.abs(y2 - y1);
+            // const rewardY = riskY * 2;
+
+            const yDiff = y2 - y1;
+            const targetY = y1 - yDiff * 2;
+
+            // Draw Stop Loss Box (Red)
+            ctx.fillStyle = 'rgba(255, 82, 82, 0.2)';
+            ctx.strokeStyle = '#FF5252';
+            ctx.beginPath();
+            ctx.rect(x1, y1, x2 - x1, y2 - y1);
+            ctx.fill();
+            ctx.stroke();
+
+            // Draw Take Profit Box (Green)
+            ctx.fillStyle = 'rgba(0, 230, 118, 0.2)';
+            ctx.strokeStyle = '#00E676';
+            ctx.beginPath();
+            ctx.rect(x1, y1, x2 - x1, targetY - y1);
+            ctx.fill();
+            ctx.stroke();
+
+            // Draw Labels
+            ctx.fillStyle = '#00E676';
+            ctx.fillText('Target', x2 + 5, targetY);
+        }
+
         // Draw Entry Line
         ctx.beginPath();
         ctx.moveTo(x1, y1);
         ctx.lineTo(x2, y1);
         ctx.strokeStyle = '#787B86';
         ctx.stroke();
-        
-        // Draw Labels
-        ctx.fillStyle = '#00E676';
-        ctx.fillText('Target', x2 + 5, targetY);
     }
 
-    _drawAnchors(ctx, x1, y1, x2, y2, type) {
+    _drawAnchors(ctx, x1, y1, x2, y2, d) {
+        const type = d.type;
         const radius = 6;
         ctx.fillStyle = '#FFFFFF';
         ctx.strokeStyle = '#2962FF';
@@ -266,12 +325,34 @@ class DrawingsPaneRenderer {
             ctx.stroke();
         };
 
-        drawPoint(x1, y1);
-        drawPoint(x2, y2);
-        
-        if (type === 'rect' || type === 'long' || type === 'short') {
-             drawPoint(x1, y2);
-             drawPoint(x2, y1);
+        if (type === 'long' || type === 'short') {
+            // Anchor 1: Origin (Entry)
+            drawPoint(x1, y1);
+
+            // Anchor 2: Width (Right, vertically centered on Entry)
+            drawPoint(x2, y1);
+
+            // Anchor 3 & 4: Top/Bottom
+            if (d.p3 && d.p4) {
+                const y3 = this._series.priceToCoordinate(d.p3.price);
+                const y4 = this._series.priceToCoordinate(d.p4.price);
+                const xMid = (x1 + x2) / 2;
+
+                drawPoint(xMid, y3);
+                drawPoint(xMid, y4);
+            } else {
+                // Fallback anchors for old drawings
+                drawPoint(x2, y2); // SL anchor
+            }
+        } else {
+            // Standard Rect/Line/Fib
+            drawPoint(x1, y1);
+            drawPoint(x2, y2);
+
+            if (type === 'rect') {
+                drawPoint(x1, y2);
+                drawPoint(x2, y1);
+            }
         }
     }
 }
@@ -282,7 +363,7 @@ export class DrawingsPrimitive {
         this._series = null;
         this._chart = null;
         this._selectedId = null;
-        this._requestUpdate = () => {};
+        this._requestUpdate = () => { };
     }
 
     attached({ chart, series, requestUpdate }) {
@@ -294,7 +375,7 @@ export class DrawingsPrimitive {
     detached() {
         this._chart = null;
         this._series = null;
-        this._requestUpdate = () => {};
+        this._requestUpdate = () => { };
     }
 
     setDrawings(drawings) {
