@@ -129,13 +129,13 @@ class DrawingsPaneRenderer {
                 } else if (d.type === 'fib') {
                     this._drawFib(ctx, x1, y1, x2, y2);
                 } else if (d.type === 'long') {
-                    this._drawPosition(ctx, x1, y1, x2, y2, 'long');
+                    this._drawPosition(ctx, x1, y1, x2, y2, 'long', d);
                 } else if (d.type === 'short') {
-                    this._drawPosition(ctx, x1, y1, x2, y2, 'short');
+                    this._drawPosition(ctx, x1, y1, x2, y2, 'short', d);
                 }
 
                 if (d.id === this._selectedId) {
-                    this._drawAnchors(ctx, x1, y1, x2, y2, d.type);
+                    this._drawAnchors(ctx, x1, y1, x2, y2, d.type, d);
                 }
 
                 ctx.restore();
@@ -204,31 +204,30 @@ class DrawingsPaneRenderer {
         });
     }
 
-    _drawPosition(ctx, x1, y1, x2, y2, type) {
+    _drawPosition(ctx, x1, y1, x2, y2, type, d) {
         // x1, y1 is Entry
-        // x2, y2 is Stop Loss (visually)
+        // x2, y2 is Stop Loss (visually) - we use x2 for width
         
-        // We need to calculate Target based on Risk.
-        // Risk = |y2 - y1|
-        // Let's assume Reward = 2 * Risk
+        let targetY;
         
-        const riskY = Math.abs(y2 - y1);
-        const rewardY = riskY * 2;
-        
-        // Determine direction based on type
-        // Long: SL should be below Entry (y2 > y1). Target above (y < y1).
-        // Short: SL should be above Entry (y2 < y1). Target below (y > y1).
-        
-        // However, we respect user's drag.
-        // If user drags SL, we calculate Target in opposite direction.
-        
-        const yDiff = y2 - y1;
-        const targetY = y1 - yDiff * 2;
-        
+        if (d && d.p3) {
+            // Apply bounds check/validation if needed
+             targetY = this._series.priceToCoordinate(d.p3.price);
+             if (targetY === null) {
+                 const yDiff = y2 - y1;
+                 targetY = y1 - yDiff * 2;
+             }
+        } else {
+            // Fallback calculation for old drawings or during creation
+            const yDiff = y2 - y1;
+            targetY = y1 - yDiff * 2;
+        }
+
         // Draw Stop Loss Box (Red)
         ctx.fillStyle = 'rgba(255, 82, 82, 0.2)';
         ctx.strokeStyle = '#FF5252';
         ctx.beginPath();
+        // Box from Entry (y1) to SL (y2), Width is x2 - x1
         ctx.rect(x1, y1, x2 - x1, y2 - y1);
         ctx.fill();
         ctx.stroke();
@@ -237,6 +236,7 @@ class DrawingsPaneRenderer {
         ctx.fillStyle = 'rgba(0, 230, 118, 0.2)';
         ctx.strokeStyle = '#00E676';
         ctx.beginPath();
+        // Box from Entry (y1) to Target (targetY)
         ctx.rect(x1, y1, x2 - x1, targetY - y1);
         ctx.fill();
         ctx.stroke();
@@ -250,10 +250,19 @@ class DrawingsPaneRenderer {
         
         // Draw Labels
         ctx.fillStyle = '#00E676';
-        ctx.fillText('Target', x2 + 5, targetY);
+        ctx.font = '12px sans-serif';
+        // Ensure coords are valid numbers
+        if (!isNaN(x2) && !isNaN(targetY)) {
+             ctx.fillText('Target', x2 + 5, targetY);
+        }
+        
+        ctx.fillStyle = '#FF5252';
+        if (!isNaN(x2) && !isNaN(y2)) {
+            ctx.fillText('Stop', x2 + 5, y2);
+        }
     }
 
-    _drawAnchors(ctx, x1, y1, x2, y2, type) {
+    _drawAnchors(ctx, x1, y1, x2, y2, type, d) {
         const radius = 6;
         ctx.fillStyle = '#FFFFFF';
         ctx.strokeStyle = '#2962FF';
@@ -266,12 +275,41 @@ class DrawingsPaneRenderer {
             ctx.stroke();
         };
 
-        drawPoint(x1, y1);
-        drawPoint(x2, y2);
-        
-        if (type === 'rect' || type === 'long' || type === 'short') {
-             drawPoint(x1, y2);
-             drawPoint(x2, y1);
+        if (type === 'long' || type === 'short') {
+            // Anchor 0: Entry Point (Left) - p1
+            drawPoint(x1, y1);
+            
+            // Anchor 1: SL Point (Right) - p2
+            drawPoint(x2, y2);
+            
+            // Anchor 2: Target Point (Right) - p3
+            let targetY;
+            if (d && d.p3) {
+                 targetY = this._series.priceToCoordinate(d.p3.price);
+                 if (targetY === null) {
+                    const yDiff = y2 - y1;
+                    targetY = y1 - yDiff * 2;
+                 }
+            } else {
+                 const yDiff = y2 - y1;
+                 targetY = y1 - yDiff * 2;
+            }
+             
+            if (targetY !== null && !isNaN(targetY)) {
+                drawPoint(x2, targetY);
+            }
+            
+            // Anchor 3: Width Control (Right Entry)
+            drawPoint(x2, y1);
+            
+        } else {
+            drawPoint(x1, y1);
+            drawPoint(x2, y2);
+            
+            if (type === 'rect') {
+                 drawPoint(x1, y2);
+                 drawPoint(x2, y1);
+            }
         }
     }
 }

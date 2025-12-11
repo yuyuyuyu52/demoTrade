@@ -311,7 +311,8 @@ export default function Chart() {
                     id: d.id,
                     type: d.type,
                     p1: d.data.p1,
-                    p2: d.data.p2
+                    p2: d.data.p2,
+                    p3: d.data.p3 // Load p3 if exists
                 }));
                 setDrawings(loadedDrawings);
                 if (drawingsPrimitiveRef.current) {
@@ -335,7 +336,7 @@ export default function Chart() {
                 account_id: user.id,
                 symbol: symbol,
                 type: drawing.type,
-                data: { p1: drawing.p1, p2: drawing.p2 }
+                data: { p1: drawing.p1, p2: drawing.p2, p3: drawing.p3 }
             };
             const res = await fetch('/api/drawings/', {
                 method: 'POST',
@@ -384,7 +385,7 @@ export default function Chart() {
 
         try {
             const payload = {
-                data: { p1: drawing.p1, p2: drawing.p2 }
+                data: { p1: drawing.p1, p2: drawing.p2, p3: drawing.p3 }
             };
             await fetch(`/api/drawings/${drawing.id}`, {
                 method: 'PUT',
@@ -1046,10 +1047,33 @@ export default function Chart() {
                     } else {
                         // Second Click: Finish Drawing
                         const tempId = `temp_${Date.now()}_${Math.random()}`;
+
+                        let finalP2 = { time, price }; // from mouse
+                        let finalP3 = null; // Target for Long/Short
+
+                        // For Long/Short, calculate initial TP (p3)
+                        if (activeTool === 'long' || activeTool === 'short') {
+                            const p1 = currentDrawingRef.current.p1;
+                            const p2 = finalP2;
+
+                            const y1 = p1.price;
+                            const y2 = p2.price;
+                            const yDiff = y2 - y1;
+
+                            // Default 2R Target
+                            const targetPrice = y1 - yDiff * 2;
+
+                            finalP3 = {
+                                time: p2.time, // Share end time
+                                price: targetPrice
+                            };
+                        }
+
                         const newDrawing = {
                             ...currentDrawingRef.current,
-                            id: tempId
-                            // p2 is already set from mousemove (preserves Shift-lock)
+                            id: tempId,
+                            p2: finalP2,
+                            p3: finalP3
                         };
 
                         // Add to state immediately with temp ID
@@ -1170,9 +1194,25 @@ export default function Chart() {
                             { x: p2.x, y: p2.y, idx: 1 }, // p2
                         ];
 
-                        if (['rect', 'long', 'short'].includes(drawing.type)) {
+                        if (['rect'].includes(drawing.type)) {
                             anchors.push({ x: p1.x, y: p2.y, idx: 2 }); // bottom-left / top-right
                             anchors.push({ x: p2.x, y: p1.y, idx: 3 }); // top-left / bottom-right
+                        } else if (['long', 'short'].includes(drawing.type)) {
+                            // Anchor 2: Target (p3)
+                            if (drawing.p3) {
+                                const p3Coord = getCoordinate(drawing.p3.time, drawing.p3.price);
+                                if (p3Coord) {
+                                    anchors.push({ x: p2.x, y: p3Coord.y, idx: 2 });
+                                }
+                            } else {
+                                // Calculate implicit target if p3 missing
+                                const yDiff = p2.y - p1.y;
+                                const targetY = p1.y - yDiff * 2;
+                                anchors.push({ x: p2.x, y: targetY, idx: 2 });
+                            }
+
+                            // Anchor 3: Width Control (Right Entry)
+                            anchors.push({ x: p2.x, y: p1.y, idx: 3 });
                         }
 
                         for (const anchor of anchors) {
@@ -1323,16 +1363,44 @@ export default function Chart() {
                                 constrainedPoint = { time: newPoint.time, price: d.p1.price };
                             }
 
-                            if (pointIndex === 0) { // p1
+                            if (pointIndex === 0) { // p1 (Entry)
                                 newD.p1 = newPoint;
-                            } else if (pointIndex === 1) { // p2
+                                // If Long/Short, moving Entry optionally moves others? 
+                                // For now, just moves Entry, changing Risk/Reward dynamics.
+                            } else if (pointIndex === 1) { // p2 (SL / End)
                                 newD.p2 = constrainedPoint;
-                            } else if (pointIndex === 2) { // x1, y2 -> modify p1.x, p2.y
-                                newD.p1 = { ...newD.p1, time: newPoint.time };
-                                newD.p2 = { ...newD.p2, price: newPoint.price };
-                            } else if (pointIndex === 3) { // x2, y1 -> modify p2.x, p1.y
-                                newD.p2 = { ...newD.p2, time: constrainedPoint.time };
-                                newD.p1 = { ...newD.p1, price: constrainedPoint.price };
+                                // Sync p3 time with p2 time for Long/Short
+                                if ((d.type === 'long' || d.type === 'short') && newD.p3) {
+                                    newD.p3 = { ...newD.p3, time: constrainedPoint.time };
+                                }
+                            } else if (pointIndex === 2) {
+                                if (d.type === 'long' || d.type === 'short') {
+                                    // p3 (Target)
+                                    // Price is independent, Time synced with p2
+                                    let sharedTime = newD.p2.time; // default to existing p2 time
+                                    // If we allow dragging Time via Target handle too:
+                                    sharedTime = newPoint.time;
+
+                                    newD.p3 = { time: sharedTime, price: newPoint.price };
+                                    newD.p2 = { ...newD.p2, time: sharedTime }; // Sync p2
+                                } else {
+                                    // Rect: x1, y2 -> modify p1.x, p2.y
+                                    newD.p1 = { ...newD.p1, time: newPoint.time };
+                                    newD.p2 = { ...newD.p2, price: newPoint.price };
+                                }
+                            } else if (pointIndex === 3) {
+                                if (d.type === 'long' || d.type === 'short') {
+                                    // Width Control (Right Entry)
+                                    // Modify Time (p2.time & p3.time)
+                                    // Keep Prices same
+                                    const newTime = newPoint.time;
+                                    newD.p2 = { ...newD.p2, time: newTime };
+                                    if (newD.p3) newD.p3 = { ...newD.p3, time: newTime };
+                                } else {
+                                    // Rect: x2, y1 -> modify p2.x, p1.y
+                                    newD.p2 = { ...newD.p2, time: constrainedPoint.time };
+                                    newD.p1 = { ...newD.p1, price: constrainedPoint.price };
+                                }
                             }
 
                             return newD;
