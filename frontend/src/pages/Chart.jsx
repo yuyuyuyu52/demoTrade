@@ -29,46 +29,38 @@ const timeframeToSeconds = (tf) => {
     }
 };
 
-// 简单的快速时区转换（针对美东时间）
-// 美东时间：标准时间 UTC-5，夏令时 UTC-4
-// 这里为了性能，简化为直接减去 4 或 5 小时的偏移量
-// 注意：这只是一个近似值，用于快速展示，如果需要严格的历史时间准确性（如处理夏令时切换点），仍需更复杂的逻辑
-const toNySeconds = (ms) => {
-    // 假设当前大部分时间是夏令时 (UTC-4) 或者 标准时间 (UTC-5)
-    // 为了极致性能，我们这里简单地判断月份来决定偏移量？
-    // 或者直接使用固定偏移量？
-    // 更好的方式是使用 Date 对象的时区偏移，但是要考虑到目标时区是 NY
-    // 
-    // 实测 Intl API 非常慢，每秒只能处理几千次调用，而数学计算每秒可达数百万次。
-    // 在 K 线加载场景下（300 - 1000 个点），优化提升明显。
+// Get timezone offset in seconds for a given timestamp (ms) and IANA zone
+const getTzOffsetSeconds = (ms, timeZone = TIMEZONE) => {
+    const dtf = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        hour12: false,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+    });
 
-    // 方案：获取当前日期的 NY 偏移量缓存起来？
-    // 或者直接用 UTC-4 (14400秒) (夏令时) / UTC-5 (18000秒) (冬令时)
-    // 简单的判断规则：3月第二个周日 到 11月第一个周日 是夏令时
-
-    // 如果不追求 100% 的历史准确性（比如几年前的某个具体小时），固定 UTC-4 在大部分交易场景下是可接受的
-    // 或者我们可以牺牲一点点启动时间，计算一次当天的偏移量
-
-    const date = new Date(ms);
-    const month = date.getUTCMonth(); // 0-11
-
-    // 粗略判断夏令时 (3月-10月肯定在，11月-2月可能不在)
-    // 这是一个折中方案
-    let offset = -5; // Default Standard Time (Winter)
-
-    // March to November roughly
-    if (month > 2 && month < 10) {
-        offset = -4;
-    } else if (month === 2) {
-        // March: approximate check (pass)
-        if (date.getUTCDate() > 14) offset = -4;
-    } else if (month === 10) {
-        // Nov: approximate check
-        if (date.getUTCDate() < 7) offset = -4;
+    const parts = dtf.formatToParts(new Date(ms));
+    const filled = {};
+    for (const { type, value } of parts) {
+        filled[type] = value;
     }
+    const asUTC = Date.UTC(
+        Number(filled.year),
+        Number(filled.month) - 1,
+        Number(filled.day),
+        Number(filled.hour),
+        Number(filled.minute),
+        Number(filled.second),
+    );
 
-    return Math.floor(ms / 1000) + (offset * 3600);
+    return (asUTC - ms) / 1000; // Positive means zone ahead of UTC
 };
+
+// Convert UTC ms timestamp to chart seconds shifted to TIMEZONE
+const toNySeconds = (ms) => Math.round(ms / 1000 + getTzOffsetSeconds(ms, TIMEZONE));
 
 export default function Chart() {
     const { user } = useAuth();
@@ -157,105 +149,72 @@ export default function Chart() {
 
     // Fetch Settings from Backend
     // FVG Calculation
-    // FVG Calculation
-    // Incremental FVG Calculation State
-    const activeFVGsRef = useRef([]);
-    const lastProcessedIndexRef = useRef(0);
-
-    // Reset incremental state when symbol/timeframe changes
-    useEffect(() => {
-        activeFVGsRef.current = [];
-        lastProcessedIndexRef.current = 0;
-    }, [symbol, timeframe]);
-
-    const calculateFVGs = useCallback((data, isIncremental = false) => {
+    const calculateFVGs = useCallback((data) => {
         if (!data || data.length < 3) return [];
-
-        let startIndex = 2;
-        let activeFVGs = [];
-
-        if (isIncremental) {
-            startIndex = Math.max(2, lastProcessedIndexRef.current);
-            // Deep copy to avoid mutating the ref state directly if we were in React state (but we are in ref)
-            activeFVGs = [...activeFVGsRef.current];
-        } else {
-            // Full recalc
-            activeFVGs = [];
-            lastProcessedIndexRef.current = 0;
-            startIndex = 2;
-        }
-
+        const fvgs = [];
         let filledCount = 0;
 
-        for (let i = startIndex; i < data.length; i++) {
+        for (let i = 2; i < data.length; i++) {
             const curr = data[i];
             const prev2 = data[i - 2];
 
-            // 1. Check if current candle fills any active FVGs
-            const nextActive = [];
-            for (const fvg of activeFVGs) {
+            // Bullish FVG: Low[i] > High[i-2]
+            if (curr.low > prev2.high) {
+                const top = curr.low;
+                const bottom = prev2.high;
+
+                // Check if filled by SUBSEQUENT candles
                 let filled = false;
-
-                // Skip if FVG is from the future (shouldn't happen in sorted data, but safety check)
-                if (fvg.time >= curr.time) {
-                    nextActive.push(fvg);
-                    continue;
-                }
-
-                if (fvg.type === 'bullish') {
-                    // Bullish FVG: Filled if Price drops below Bottom
-                    const bodyLow = Math.min(curr.open, curr.close);
-                    if (bodyLow <= fvg.bottom) {
+                for (let j = i + 1; j < data.length; j++) {
+                    // Only body can fill FVG
+                    const bodyLow = Math.min(data[j].open, data[j].close);
+                    if (bodyLow <= bottom) {
                         filled = true;
-                    }
-                } else {
-                    // Bearish FVG: Filled if Price rises above Top
-                    const bodyHigh = Math.max(curr.open, curr.close);
-                    if (bodyHigh >= fvg.top) {
-                        filled = true;
+                        break;
                     }
                 }
 
                 if (!filled) {
-                    nextActive.push(fvg);
+                    fvgs.push({
+                        time: prev2.time,
+                        top,
+                        bottom,
+                        type: 'bullish'
+                    });
                 } else {
-                    fvg.filled = true;
                     filledCount++;
                 }
-            }
-            activeFVGs = nextActive;
-
-            // 2. Detect New FVG
-
-            // Bullish FVG: Low[i] > High[i-2]
-            if (curr.low > prev2.high) {
-                activeFVGs.push({
-                    time: prev2.time,
-                    top: curr.low,
-                    bottom: prev2.high,
-                    type: 'bullish',
-                    filled: false
-                });
             }
 
             // Bearish FVG: High[i] < Low[i-2]
             if (curr.high < prev2.low) {
-                activeFVGs.push({
-                    time: prev2.time,
-                    top: prev2.low,
-                    bottom: curr.high,
-                    type: 'bearish',
-                    filled: false
-                });
+                const top = prev2.low;
+                const bottom = curr.high;
+
+                let filled = false;
+                for (let j = i + 1; j < data.length; j++) {
+                    // Only body can fill FVG
+                    const bodyHigh = Math.max(data[j].open, data[j].close);
+                    if (bodyHigh >= top) {
+                        filled = true;
+                        break;
+                    }
+                }
+
+                if (!filled) {
+                    fvgs.push({
+                        time: prev2.time,
+                        top,
+                        bottom,
+                        type: 'bearish'
+                    });
+                } else {
+                    filledCount++;
+                }
             }
         }
-
-        // Update References
-        activeFVGsRef.current = activeFVGs;
-        lastProcessedIndexRef.current = data.length; // Mark all as processed
-
-        // console.log(`Calculated FVGs (Incremental=${isIncremental}): ${activeFVGs.length} active`);
-        return activeFVGs;
+        console.log(`Calculated FVGs: ${fvgs.length} active, ${filledCount} filled`);
+        return fvgs;
     }, []);
 
     // Fetch Settings from Backend
@@ -331,7 +290,7 @@ export default function Chart() {
             return;
         }
 
-        const fvgs = calculateFVGs(allDataRef.current, false); // Manual toggle needs full recalc
+        const fvgs = calculateFVGs(allDataRef.current);
         fvgPrimitiveRef.current.setFVGs(fvgs);
     }, [calculateFVGs]); // Removed showFVG dependency to keep function reference stable for WS
 
@@ -351,9 +310,7 @@ export default function Chart() {
                     id: d.id,
                     type: d.type,
                     p1: d.data.p1,
-                    p2: d.data.p2,
-                    p3: d.data.p3,
-                    p4: d.data.p4
+                    p2: d.data.p2
                 }));
                 setDrawings(loadedDrawings);
                 if (drawingsPrimitiveRef.current) {
@@ -377,12 +334,7 @@ export default function Chart() {
                 account_id: user.id,
                 symbol: symbol,
                 type: drawing.type,
-                data: {
-                    p1: drawing.p1,
-                    p2: drawing.p2,
-                    p3: drawing.p3,
-                    p4: drawing.p4
-                }
+                data: { p1: drawing.p1, p2: drawing.p2 }
             };
             const res = await fetch('/api/drawings/', {
                 method: 'POST',
@@ -431,12 +383,7 @@ export default function Chart() {
 
         try {
             const payload = {
-                data: {
-                    p1: drawing.p1,
-                    p2: drawing.p2,
-                    p3: drawing.p3,
-                    p4: drawing.p4
-                }
+                data: { p1: drawing.p1, p2: drawing.p2 }
             };
             await fetch(`/api/drawings/${drawing.id}`, {
                 method: 'PUT',
@@ -1020,6 +967,49 @@ export default function Chart() {
             return lastTime + (diff * interval);
         };
 
+        // Helper to snap price to nearest OHLC when Command/Ctrl is held
+        const snapToOHLC = (time, price, useSnap) => {
+            if (!useSnap || !allDataRef.current || allDataRef.current.length === 0) {
+                return price;
+            }
+
+            // Find the candle at or near this time
+            const data = allDataRef.current;
+            let closestCandle = null;
+            let minTimeDiff = Infinity;
+
+            for (const candle of data) {
+                const timeDiff = Math.abs(Number(candle.time) - Number(time));
+                if (timeDiff < minTimeDiff) {
+                    minTimeDiff = timeDiff;
+                    closestCandle = candle;
+                }
+            }
+
+            if (!closestCandle) return price;
+
+            // Find closest OHLC value
+            const ohlc = [
+                closestCandle.open,
+                closestCandle.high,
+                closestCandle.low,
+                closestCandle.close
+            ];
+
+            let closestPrice = ohlc[0];
+            let minPriceDiff = Math.abs(price - ohlc[0]);
+
+            for (const p of ohlc) {
+                const diff = Math.abs(price - p);
+                if (diff < minPriceDiff) {
+                    minPriceDiff = diff;
+                    closestPrice = p;
+                }
+            }
+
+            return closestPrice;
+        };
+
         const handleMouseDown = (e) => {
             if (!seriesRef.current || !chartRef.current) return;
 
@@ -1029,45 +1019,12 @@ export default function Chart() {
 
             // Drawing Logic
             if (activeTool !== 'cursor') {
-                const price = seriesRef.current.coordinateToPrice(mouseY);
+                let price = seriesRef.current.coordinateToPrice(mouseY);
                 const time = getTimeFromCoordinate(mouseX);
 
                 if (price !== null && time !== null) {
-                    if (activeTool === 'long' || activeTool === 'short') {
-                        // Single Click Creation
-                        const interval = timeframeToSeconds(timeframe);
-                        const widthTime = interval * 30; // 30 bars width
-                        const entryPrice = price;
-                        const tpPrice = activeTool === 'long' ? (entryPrice * 1.01) : (entryPrice * 0.99);
-                        const slPrice = activeTool === 'long' ? (entryPrice * 0.99) : (entryPrice * 1.01);
-
-                        const tempId = `temp_${Date.now()}_${Math.random()}`;
-                        const newDrawing = {
-                            id: tempId,
-                            type: activeTool,
-                            p1: { time, price: entryPrice },
-                            p2: { time: time + widthTime, price: entryPrice },
-                            p3: { time, price: tpPrice },
-                            p4: { time, price: slPrice }
-                        };
-
-                        const updatedDrawings = [...drawingsRef.current, newDrawing];
-                        drawingsRef.current = updatedDrawings;
-                        setDrawings(updatedDrawings);
-                        if (drawingsPrimitiveRef.current) {
-                            drawingsPrimitiveRef.current.setDrawings(updatedDrawings);
-                        }
-
-                        selectedDrawingIdRef.current = tempId;
-                        setSelectedDrawingId(tempId);
-                        if (drawingsPrimitiveRef.current) {
-                            drawingsPrimitiveRef.current.setSelectedId(tempId);
-                        }
-
-                        saveDrawing(newDrawing);
-                        setActiveTool('cursor');
-                        return;
-                    }
+                    // Apply OHLC snap if Command/Ctrl is held
+                    price = snapToOHLC(time, price, e.metaKey || e.ctrlKey);
 
                     if (!currentDrawingRef.current) {
                         // First Click: Start Drawing
@@ -1083,8 +1040,8 @@ export default function Chart() {
                         const tempId = `temp_${Date.now()}_${Math.random()}`;
                         const newDrawing = {
                             ...currentDrawingRef.current,
-                            id: tempId,
-                            p2: { time, price }
+                            id: tempId
+                            // p2 is already set from mousemove (preserves Shift-lock)
                         };
 
                         // Add to state immediately with temp ID
@@ -1113,159 +1070,143 @@ export default function Chart() {
                         chartRef.current.applyOptions({ handleScroll: true, handleScale: true });
                     }
                 }
+                return;
+            }
+
+            // If already dragging/placing, don't select another line
+            if (draggingLineRef.current) return;
+
+            // Check for Anchor click first (if selected)
+            if (selectedDrawingIdRef.current) {
+                const drawing = drawingsRef.current.find(d => d.id === selectedDrawingIdRef.current);
+                if (drawing) {
+                    const p1 = getCoordinate(drawing.p1.time, drawing.p1.price);
+                    const p2 = getCoordinate(drawing.p2.time, drawing.p2.price);
+
+                    if (p1 && p2) {
+                        const anchors = [
+                            { x: p1.x, y: p1.y, idx: 0 }, // p1
+                            { x: p2.x, y: p2.y, idx: 1 }, // p2
+                        ];
+
+                        if (['rect', 'long', 'short'].includes(drawing.type)) {
+                            anchors.push({ x: p1.x, y: p2.y, idx: 2 }); // bottom-left / top-right
+                            anchors.push({ x: p2.x, y: p1.y, idx: 3 }); // top-left / bottom-right
+                        }
+
+                        for (const anchor of anchors) {
+                            const dist = Math.hypot(mouseX - anchor.x, mouseY - anchor.y);
+                            if (dist < 10) {
+                                dragStateRef.current = {
+                                    drawingId: drawing.id,
+                                    pointIndex: anchor.idx,
+                                };
+                                chartRef.current.applyOptions({ handleScroll: false, handleScale: false });
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Check for Drawing Body click
+            let closestDrawing = null;
+            let minDrawDiff = Infinity;
+
+            console.log('DEBUG: Checking', drawingsRef.current.length, 'drawings, activeTool=', activeTool);
+            drawingsRef.current.forEach(d => {
+                const p1 = getCoordinate(d.p1.time, d.p1.price);
+                const p2 = getCoordinate(d.p2.time, d.p2.price);
+                if (!p1 || !p2) return;
+
+                let dist = Infinity;
+
+                if (d.type === 'line' || d.type === 'fib') {
+                    dist = pointToLineDistance(mouseX, mouseY, p1.x, p1.y, p2.x, p2.y);
+                } else if (['rect', 'long', 'short'].includes(d.type)) {
+                    const minX = Math.min(p1.x, p2.x);
+                    const maxX = Math.max(p1.x, p2.x);
+                    const minY = Math.min(p1.y, p2.y);
+                    const maxY = Math.max(p1.y, p2.y);
+
+                    if (mouseX >= minX && mouseX <= maxX && mouseY >= minY && mouseY <= maxY) {
+                        dist = 0;
+                    } else {
+                        const dx = Math.max(minX - mouseX, 0, mouseX - maxX);
+                        const dy = Math.max(minY - mouseY, 0, mouseY - maxY);
+                        dist = Math.sqrt(dx * dx + dy * dy);
+                    }
+                }
+
+                if (dist < 10) {
+                    if (dist < minDrawDiff) {
+                        minDrawDiff = dist;
+                        closestDrawing = d;
+                    }
+                }
+            });
+
+            console.log('DEBUG: closestDrawing=', closestDrawing ? closestDrawing.id : 'none');
+            if (closestDrawing) {
+                console.log('DEBUG: Selecting drawing', closestDrawing.id);
+                setSelectedDrawingId(closestDrawing.id);
+                selectedDrawingIdRef.current = closestDrawing.id;
+                if (drawingsPrimitiveRef.current) {
+                    drawingsPrimitiveRef.current.setSelectedId(closestDrawing.id);
+                }
+                return;
+            }
+
+            // Price Line Logic (Existing)
+            const price = seriesRef.current.coordinateToPrice(mouseY);
+            if (price === null) {
+                // Clicked on empty space and no drawing hit
+                console.log('DEBUG: price is null, clearing selection');
+                setSelectedDrawingId(null);
+                selectedDrawingIdRef.current = null;
+                if (drawingsPrimitiveRef.current) {
+                    drawingsPrimitiveRef.current.setSelectedId(null);
+                }
+                return;
+            }
+
+            // Find closest line
+            let closestLine = null;
+            let minDiff = Infinity;
+
+            priceLinesRef.current.forEach(item => {
+                if (!item.draggableInfo) return;
+
+                const lineY = seriesRef.current.priceToCoordinate(item.price);
+                if (lineY === null) return;
+
+                const diff = Math.abs(mouseY - lineY);
+                if (diff < 10) { // 10px threshold
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        closestLine = item;
+                    }
+                }
+            });
+
+            if (closestLine) {
+                // Prevent dragging for Position lines
+                if (closestLine.draggableInfo.type === 'POS') return;
+
+                draggingLineRef.current = closestLine;
+                setDraggingLine(closestLine); // Trigger re-render if needed, or just for UI state
+
+                // Disable chart scrolling
+                chartRef.current.timeScale().applyOptions({ shiftVisibleRangeOnNewBar: false });
+                chartRef.current.applyOptions({ handleScroll: false, handleScale: false });
             } else {
-
-                // If already dragging/placing, don't select another line
-                if (draggingLineRef.current) return;
-
-                // Check for Anchor click first (if selected)
-                if (selectedDrawingIdRef.current) {
-                    const drawing = drawingsRef.current.find(d => d.id === selectedDrawingIdRef.current);
-                    if (drawing) {
-                        const p1 = getCoordinate(drawing.p1.time, drawing.p1.price);
-                        const p2 = getCoordinate(drawing.p2.time, drawing.p2.price);
-
-                        if (p1 && p2) {
-                            const anchors = [];
-                            if (drawing.type === 'long' || drawing.type === 'short') {
-                                // A1: Origin
-                                anchors.push({ x: p1.x, y: p1.y, idx: 0 });
-                                // A2: Width (Right-Center aligned with Origin Y)
-                                anchors.push({ x: p2.x, y: p1.y, idx: 1 });
-                                // A3 & A4: Top/Bottom
-                                if (drawing.p3 && drawing.p4) {
-                                    const y3 = seriesRef.current.priceToCoordinate(drawing.p3.price);
-                                    const y4 = seriesRef.current.priceToCoordinate(drawing.p4.price);
-                                    if (y3 !== null && y4 !== null) {
-                                        const midX = (p1.x + p2.x) / 2;
-                                        anchors.push({ x: midX, y: y3, idx: 2 });
-                                        anchors.push({ x: midX, y: y4, idx: 3 });
-                                    }
-                                }
-                            } else {
-                                anchors.push({ x: p1.x, y: p1.y, idx: 0 }); // p1
-                                anchors.push({ x: p2.x, y: p2.y, idx: 1 }); // p2
-
-                                if (['rect'].includes(drawing.type)) {
-                                    anchors.push({ x: p1.x, y: p2.y, idx: 2 });
-                                    anchors.push({ x: p2.x, y: p1.y, idx: 3 });
-                                }
-                            }
-
-                            for (const anchor of anchors) {
-                                const dist = Math.hypot(mouseX - anchor.x, mouseY - anchor.y);
-                                if (dist < 10) {
-                                    dragStateRef.current = {
-                                        drawingId: drawing.id,
-                                        pointIndex: anchor.idx,
-                                    };
-                                    chartRef.current.applyOptions({ handleScroll: false, handleScale: false });
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Check for Drawing Body click
-                let closestDrawing = null;
-                let minDrawDiff = Infinity;
-
-                console.log('DEBUG: Checking', drawingsRef.current.length, 'drawings, activeTool=', activeTool);
-                drawingsRef.current.forEach(d => {
-                    const p1 = getCoordinate(d.p1.time, d.p1.price);
-                    const p2 = getCoordinate(d.p2.time, d.p2.price);
-                    if (!p1 || !p2) return;
-
-                    let dist = Infinity;
-
-                    if (d.type === 'line' || d.type === 'fib') {
-                        dist = pointToLineDistance(mouseX, mouseY, p1.x, p1.y, p2.x, p2.y);
-                    } else if (['rect', 'long', 'short'].includes(d.type)) {
-                        const minX = Math.min(p1.x, p2.x);
-                        const maxX = Math.max(p1.x, p2.x);
-                        const minY = Math.min(p1.y, p2.y);
-                        const maxY = Math.max(p1.y, p2.y);
-
-                        if (mouseX >= minX && mouseX <= maxX && mouseY >= minY && mouseY <= maxY) {
-                            dist = 0;
-                        } else {
-                            const dx = Math.max(minX - mouseX, 0, mouseX - maxX);
-                            const dy = Math.max(minY - mouseY, 0, mouseY - maxY);
-                            dist = Math.sqrt(dx * dx + dy * dy);
-                        }
-                    }
-
-                    if (dist < 10) {
-                        if (dist < minDrawDiff) {
-                            minDrawDiff = dist;
-                            closestDrawing = d;
-                        }
-                    }
-                });
-
-                console.log('DEBUG: closestDrawing=', closestDrawing ? closestDrawing.id : 'none');
-                if (closestDrawing) {
-                    console.log('DEBUG: Selecting drawing', closestDrawing.id);
-                    setSelectedDrawingId(closestDrawing.id);
-                    selectedDrawingIdRef.current = closestDrawing.id;
-                    if (drawingsPrimitiveRef.current) {
-                        drawingsPrimitiveRef.current.setSelectedId(closestDrawing.id);
-                    }
-                    return;
-                }
-
-                // Price Line Logic (Existing)
-                const price = seriesRef.current.coordinateToPrice(mouseY);
-                if (price === null) {
-                    // Clicked on empty space and no drawing hit
-                    console.log('DEBUG: price is null, clearing selection');
-                    setSelectedDrawingId(null);
-                    selectedDrawingIdRef.current = null;
-                    if (drawingsPrimitiveRef.current) {
-                        drawingsPrimitiveRef.current.setSelectedId(null);
-                    }
-                    return;
-                }
-
-                // Find closest line
-                let closestLine = null;
-                let minDiff = Infinity;
-
-                priceLinesRef.current.forEach(item => {
-                    if (!item.draggableInfo) return;
-
-                    const lineY = seriesRef.current.priceToCoordinate(item.price);
-                    if (lineY === null) return;
-
-                    const diff = Math.abs(mouseY - lineY);
-                    if (diff < 10) { // 10px threshold
-                        if (diff < minDiff) {
-                            minDiff = diff;
-                            closestLine = item;
-                        }
-                    }
-                });
-
-                if (closestLine) {
-                    // Prevent dragging for Position lines
-                    if (closestLine.draggableInfo.type === 'POS') return;
-
-                    draggingLineRef.current = closestLine;
-                    setDraggingLine(closestLine); // Trigger re-render if needed, or just for UI state
-
-                    // Disable chart scrolling
-                    chartRef.current.timeScale().applyOptions({ shiftVisibleRangeOnNewBar: false });
-                    chartRef.current.applyOptions({ handleScroll: false, handleScale: false });
-                } else {
-                    // Clicked on chart but hit nothing (no drawing, no price line)
-                    // Deselect drawing
-                    console.log('DEBUG: no closestLine, clearing selection');
-                    setSelectedDrawingId(null);
-                    selectedDrawingIdRef.current = null;
-                    if (drawingsPrimitiveRef.current) {
-                        drawingsPrimitiveRef.current.setSelectedId(null);
-                    }
+                // Clicked on chart but hit nothing (no drawing, no price line)
+                // Deselect drawing
+                console.log('DEBUG: no closestLine, clearing selection');
+                setSelectedDrawingId(null);
+                selectedDrawingIdRef.current = null;
+                if (drawingsPrimitiveRef.current) {
+                    drawingsPrimitiveRef.current.setSelectedId(null);
                 }
             }
         };
@@ -1278,10 +1219,13 @@ export default function Chart() {
 
             // Drawing Dragging
             if (dragStateRef.current) {
-                const price = seriesRef.current.coordinateToPrice(y);
+                let price = seriesRef.current.coordinateToPrice(y);
                 const time = getTimeFromCoordinate(x);
 
                 if (price !== null && time !== null) {
+                    // Apply OHLC snap if Command/Ctrl is held
+                    price = snapToOHLC(time, price, e.metaKey || e.ctrlKey);
+
                     const { drawingId, pointIndex } = dragStateRef.current;
 
                     setDrawings(prev => {
@@ -1291,40 +1235,27 @@ export default function Chart() {
                             const newD = { ...d };
                             const newPoint = { time, price };
 
-                            if (d.type === 'long' || d.type === 'short') {
-                                if (pointIndex === 0) { // Origin: Move Entire Shape
-                                    const dt = newPoint.time - d.p1.time;
-                                    const dp = newPoint.price - d.p1.price;
+                            // Apply Shift key constraint for horizontal locking
+                            let constrainedPoint = newPoint;
+                            if (e.shiftKey && (pointIndex === 1 || pointIndex === 3)) {
+                                // Lock to p1's price for horizontal line
+                                constrainedPoint = { time: newPoint.time, price: d.p1.price };
+                            }
 
-                                    newD.p1 = newPoint;
-                                    if (d.p2) newD.p2 = { time: d.p2.time + dt, price: d.p2.price }; // Keep price same? p2 usually defines width
-                                    if (d.p3) newD.p3 = { time: d.p3.time + dt, price: d.p3.price + dp };
-                                    if (d.p4) newD.p4 = { time: d.p4.time + dt, price: d.p4.price + dp };
-                                } else if (pointIndex === 1) { // Width: Adjust p2 time
-                                    newD.p2 = { ...d.p2, time: newPoint.time };
-                                } else if (pointIndex === 2) { // Top: Adjust p3 price
-                                    newD.p3 = { ...d.p3, price: newPoint.price };
-                                } else if (pointIndex === 3) { // Bottom: Adjust p4 price
-                                    newD.p4 = { ...d.p4, price: newPoint.price };
-                                }
-                            } else {
-                                if (pointIndex === 0) { // p1
-                                    newD.p1 = newPoint;
-                                } else if (pointIndex === 1) { // p2
-                                    newD.p2 = newPoint;
-                                } else if (pointIndex === 2) { // x1, y2 -> modify p1.x, p2.y
-                                    newD.p1 = { ...newD.p1, time: newPoint.time };
-                                    newD.p2 = { ...newD.p2, price: newPoint.price };
-                                } else if (pointIndex === 3) { // x2, y1 -> modify p2.x, p1.y
-                                    newD.p2 = { ...newD.p2, time: newPoint.time };
-                                    newD.p1 = { ...newD.p1, price: newPoint.price };
-                                }
+                            if (pointIndex === 0) { // p1
+                                newD.p1 = newPoint;
+                            } else if (pointIndex === 1) { // p2
+                                newD.p2 = constrainedPoint;
+                            } else if (pointIndex === 2) { // x1, y2 -> modify p1.x, p2.y
+                                newD.p1 = { ...newD.p1, time: newPoint.time };
+                                newD.p2 = { ...newD.p2, price: newPoint.price };
+                            } else if (pointIndex === 3) { // x2, y1 -> modify p2.x, p1.y
+                                newD.p2 = { ...newD.p2, time: constrainedPoint.time };
+                                newD.p1 = { ...newD.p1, price: constrainedPoint.price };
                             }
 
                             return newD;
                         });
-
-                        drawingsRef.current = updated; // Update ref immediately for mouseUp
 
                         if (drawingsPrimitiveRef.current) {
                             drawingsPrimitiveRef.current.setDrawings(updated);
@@ -1337,11 +1268,21 @@ export default function Chart() {
 
             // Drawing Logic
             if (currentDrawingRef.current) {
-                const price = seriesRef.current.coordinateToPrice(y);
+                let price = seriesRef.current.coordinateToPrice(y);
                 const time = getTimeFromCoordinate(x);
 
                 if (price !== null && time !== null) {
-                    currentDrawingRef.current.p2 = { time, price };
+                    // Apply OHLC snap if Command/Ctrl is held
+                    price = snapToOHLC(time, price, e.metaKey || e.ctrlKey);
+
+                    let targetPrice = price;
+
+                    // Shift key for horizontal line
+                    if (e.shiftKey) {
+                        targetPrice = currentDrawingRef.current.p1.price;
+                    }
+
+                    currentDrawingRef.current.p2 = { time, price: targetPrice };
 
                     // Update primitive
                     if (drawingsPrimitiveRef.current) {
@@ -1385,7 +1326,7 @@ export default function Chart() {
 
         const handleMouseUp = async () => {
             if (dragStateRef.current) {
-                const d = drawingsRef.current.find(x => x.id === dragStateRef.current.drawingId);
+                const d = drawings.find(x => x.id === dragStateRef.current.drawingId);
                 if (d) updateDrawing(d);
 
                 dragStateRef.current = null;
@@ -1546,7 +1487,7 @@ export default function Chart() {
             try {
                 setError(null);
                 // Use proxy for Binance API to avoid CORS
-                let url = `/api/market/klines?symbol=${symbol}&interval=${timeframe}&limit=300`;
+                let url = `/api/market/klines?symbol=${symbol}&interval=${timeframe}&limit=1000`;
                 if (endTime) {
                     url += `&endTime=${endTime}`;
                 }
@@ -1644,8 +1585,7 @@ export default function Chart() {
                 // Update FVGs - use ref to get latest showFVG value
                 if (fvgPrimitiveRef.current) {
                     if (showFVGRef.current) {
-                        // For initial load, use full recalc (isIncremental=false)
-                        const fvgs = calculateFVGs(allDataRef.current, false);
+                        const fvgs = calculateFVGs(allDataRef.current);
                         fvgPrimitiveRef.current.setFVGs(fvgs);
                     } else {
                         fvgPrimitiveRef.current.setFVGs([]);
@@ -1982,12 +1922,10 @@ export default function Chart() {
                                 const drawingsToDelete = drawingsRef.current.filter(d => !String(d.id).startsWith('temp_'));
                                 await Promise.all(drawingsToDelete.map(d => deleteDrawing(d.id)));
 
-                                // Update FVG incrementally
-                                if (showFVGRef.current && fvgPrimitiveRef.current) {
-                                    // We pass the full array, but the function will check lastProcessedIndexRef
-                                    const fvgs = calculateFVGs(allDataRef.current, true);
-                                    fvgPrimitiveRef.current.setFVGs(fvgs);
-                                } setSelectedDrawingId(null);
+                                // Clear frontend state
+                                drawingsRef.current = [];
+                                setDrawings([]);
+                                setSelectedDrawingId(null);
                                 selectedDrawingIdRef.current = null;
                                 if (drawingsPrimitiveRef.current) {
                                     drawingsPrimitiveRef.current.setDrawings([]);
