@@ -46,16 +46,13 @@ export default function EquityCurve() {
         timeVisible: true,
         secondsVisible: true,
       },
-      handleScale: false, // Prevent zooming to keep "no scrolling" view by default if desired, but user might want to zoom. 
-      // User said "best not to scroll to see all". fitContent handles that. 
-      // I'll leave scaling enabled but enforce fitContent on update.
     });
 
     const newSeries = chart.addSeries(AreaSeries, {
       lineColor: '#2962FF',
       topColor: '#2962FF',
       bottomColor: 'rgba(41, 98, 255, 0.28)',
-      crosshairMarkerVisible: true,
+      crosshairMarkerVisible: false,
     });
 
     chartRef.current = chart;
@@ -180,8 +177,8 @@ export default function EquityCurve() {
               key={range.value}
               onClick={() => setTimeRange(range.value)}
               className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${timeRange === range.value
-                  ? 'bg-white text-blue-600 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
+                ? 'bg-white text-blue-600 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
                 }`}
             >
               {range.label}
