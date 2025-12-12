@@ -139,3 +139,5 @@ class DrawingResponse(BaseModel):
 class OrderUpdate(BaseModel):
     price: Optional[float] = None
     quantity: Optional[float] = None
+    take_profit_price: Optional[float] = None
+    stop_loss_price: Optional[float] = None

@@ -87,8 +87,14 @@ async def update_order(order_id: int, order_update: OrderUpdate, db: AsyncSessio
     if order_update.price is not None:
         order.limit_price = order_update.price
     
-    if order_update.quantity is not None:
+    if (order_update.quantity is not None):
         order.quantity = order_update.quantity
+
+    if (order_update.take_profit_price is not None):
+        order.take_profit_price = order_update.take_profit_price
+
+    if (order_update.stop_loss_price is not None):
+        order.stop_loss_price = order_update.stop_loss_price
 
     await db.commit()
     await db.refresh(order)

@@ -785,6 +785,35 @@ export default function Chart() {
                             // Limit Order Price
                             if (order.limit_price) {
                                 addPriceLine(order.limit_price, `${order.side} ${order.quantity}`, '#FF9800', LineStyle.Solid, { type: 'ORDER', orderId: order.id });
+
+                                // Limit Order TP/SL Lines
+                                if (order.take_profit_price) {
+                                    const tp = parseFloat(order.take_profit_price);
+                                    const entry = parseFloat(order.limit_price);
+                                    const qty = parseFloat(order.quantity);
+                                    const isBuy = order.side === 'BUY';
+                                    const pnl = (tp - entry) * qty * (isBuy ? 1 : -1);
+                                    const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`;
+
+                                    addPriceLine(tp, `TP (Order) ${pnlStr}`, '#26a69a', LineStyle.Dashed, {
+                                        type: 'ORDER_TP',
+                                        orderId: order.id
+                                    });
+                                }
+
+                                if (order.stop_loss_price) {
+                                    const sl = parseFloat(order.stop_loss_price);
+                                    const entry = parseFloat(order.limit_price);
+                                    const qty = parseFloat(order.quantity);
+                                    const isBuy = order.side === 'BUY';
+                                    const pnl = (sl - entry) * qty * (isBuy ? 1 : -1);
+                                    const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`;
+
+                                    addPriceLine(sl, `SL (Order) ${pnlStr}`, '#ef5350', LineStyle.Dashed, {
+                                        type: 'ORDER_SL',
+                                        orderId: order.id
+                                    });
+                                }
                             }
                         }
                     });
@@ -1575,6 +1604,17 @@ export default function Chart() {
                             body: JSON.stringify({ price: newPrice })
                         });
                         console.log(`Updated Order ${orderId} price to ${newPrice}`);
+                    } else if (type === 'ORDER_TP' || type === 'ORDER_SL') {
+                        const payload = {};
+                        if (type === 'ORDER_TP') payload.take_profit_price = newPrice;
+                        if (type === 'ORDER_SL') payload.stop_loss_price = newPrice;
+
+                        await fetch(`/api/orders/${orderId}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                        console.log(`Updated ${type} for Order ${orderId} to ${newPrice}`);
                     }
                 } catch (err) {
                     console.error("Failed to update", err);
