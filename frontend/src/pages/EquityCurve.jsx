@@ -110,7 +110,20 @@ export default function EquityCurve() {
           }
         }
 
-        setAllData(uniqueData);
+        if (uniqueData.length > 0) {
+          setAllData(prev => {
+            // Simple optimization check: if length and last items are same, skip update
+            // Since this is append-only mostly, checking length and last item time/value is sufficient.
+            if (prev.length === uniqueData.length && prev.length > 0) {
+              const lastPrev = prev[prev.length - 1];
+              const lastNew = uniqueData[uniqueData.length - 1];
+              if (lastPrev.time === lastNew.time && lastPrev.value === lastNew.value) {
+                return prev;
+              }
+            }
+            return uniqueData;
+          });
+        }
       } catch (error) {
         console.error("Failed to fetch equity history", error);
       }
@@ -120,6 +133,9 @@ export default function EquityCurve() {
     const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
   }, [user]);
+
+  // Track previous time range to only fit content on change
+  const prevTimeRangeRef = useRef('ALL');
 
   // Filter and Update Chart
   useEffect(() => {
@@ -139,8 +155,8 @@ export default function EquityCurve() {
     }
 
     // Uniform Sampling (Evenly take data points)
-    // Target ~200 points for smoothness without overcrowding
-    const TARGET_POINTS = 200;
+    // Increased target to 1000 to avoid jitter on small datasets
+    const TARGET_POINTS = 1000;
     let sampledData = filteredData;
 
     if (filteredData.length > TARGET_POINTS) {
@@ -153,16 +169,19 @@ export default function EquityCurve() {
           sampledData.push(filteredData[index]);
         }
       }
-      // Ensure last point is always included to show current equity
-      if (sampledData[sampledData.length - 1].time !== filteredData[filteredData.length - 1].time) {
+      // Ensure last point is always included
+      if (sampledData.length > 0 && sampledData[sampledData.length - 1].time !== filteredData[filteredData.length - 1].time) {
         sampledData.push(filteredData[filteredData.length - 1]);
       }
     }
 
     seriesRef.current.setData(sampledData);
 
-    // Fit content to view (No scrolling required)
-    chartRef.current.timeScale().fitContent();
+    // Only fit content if time range changed to prevent resetting zoom/scroll on every data update
+    if (prevTimeRangeRef.current !== timeRange) {
+      chartRef.current.timeScale().fitContent();
+      prevTimeRangeRef.current = timeRange;
+    }
 
   }, [allData, timeRange]);
 
