@@ -569,9 +569,9 @@ export default function Chart() {
             labelElement.style.alignItems = 'center';
             labelElement.style.gap = '4px';
 
-            // Add Buttons for Position Line
-            if (draggableInfo && draggableInfo.type === 'POS') {
-                const createBtn = (text, type) => {
+            // Add Buttons for Position Line OR Order Line
+            if (draggableInfo && (draggableInfo.type === 'POS' || draggableInfo.type === 'ORDER')) {
+                const createBtn = (text, typeName) => {
                     const btn = document.createElement('button');
                     btn.innerText = text;
                     btn.style.pointerEvents = 'auto';
@@ -582,24 +582,37 @@ export default function Chart() {
                     btn.style.fontSize = '9px';
                     btn.style.fontWeight = 'bold';
                     btn.style.color = 'white';
-                    btn.style.backgroundColor = type === 'TP' ? '#26a69a' : '#ef5350';
+                    btn.style.backgroundColor = typeName.includes('TP') ? '#26a69a' : '#ef5350';
                     btn.style.lineHeight = '1';
 
                     btn.onclick = (e) => {
                         e.stopPropagation();
                         e.preventDefault();
 
-                        // Find existing line or create new one
+                        // Determine types based on parent (POS or ORDER)
+                        const isOrder = draggableInfo.type === 'ORDER';
+                        const targetType = isOrder ? (typeName === 'TP' ? 'ORDER_TP' : 'ORDER_SL') : typeName;
+                        const targetIdKey = isOrder ? 'orderId' : 'positionId';
+                        const targetIdVal = isOrder ? draggableInfo.orderId : draggableInfo.positionId;
+
+                        // Find existing line
                         let targetLine = priceLinesRef.current.find(
-                            item => item.draggableInfo && item.draggableInfo.type === type && item.draggableInfo.positionId === draggableInfo.positionId
+                            item => item.draggableInfo && item.draggableInfo.type === targetType && item.draggableInfo[targetIdKey] === targetIdVal
                         );
 
                         if (!targetLine) {
-                            // Create new line starting at current position price
-                            const color = type === 'TP' ? '#26a69a' : '#ef5350';
-                            // Recursively call addPriceLine to create the line
-                            // Note: We pass the same draggableInfo but with the specific type (TP/SL)
-                            addPriceLine(priceVal, type, color, LineStyle.Solid, { type, positionId: draggableInfo.positionId });
+                            // Create new line starting at current price + offset? or just same price
+                            // Let's spawn it slightly offset so user sees it
+                            const priceOffset = priceVal * (typeName === 'TP' ? 0.01 : -0.01); // 1% offset?
+                            // Actually better to spawn at same price or mouse y? 
+                            // Spawn at priceVal so it starts "on top" and they drag it out immediately
+
+                            const color = typeName.includes('TP') ? '#26a69a' : '#ef5350';
+
+                            addPriceLine(priceVal, typeName, color, isOrder ? LineStyle.Dashed : LineStyle.Solid, {
+                                type: targetType,
+                                [targetIdKey]: targetIdVal
+                            });
 
                             // The new line is the last one added
                             targetLine = priceLinesRef.current[priceLinesRef.current.length - 1];
