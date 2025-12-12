@@ -30,10 +30,8 @@ class DrawingsPaneRenderer {
 
                 if (tTime > lastTime) {
                     // Calculate a robust interval (ignore gaps like weekends)
-                    // Find minimum positive difference in the last few bars
                     let interval = Infinity;
-                    let found = false;
-                    const checkCount = Math.min(data.length, 6); // Check last 5 pairs
+                    const checkCount = Math.min(data.length, 10);
 
                     for (let i = 1; i < checkCount; i++) {
                         const curr = Number(data[data.length - i].time);
@@ -41,34 +39,51 @@ class DrawingsPaneRenderer {
                         const diff = curr - prev;
                         if (diff > 0 && diff < interval) {
                             interval = diff;
-                            found = true;
                         }
                     }
 
-                    if (!found) {
-                        // Fallback to last pair if logic fails
+                    if (interval === Infinity) {
                         const prevBar = data[data.length - 2];
                         interval = lastTime - Number(prevBar.time);
                     }
 
                     if (interval > 0) {
-                        const diffBars = (tTime - lastTime) / interval;
+                        // Find a valid anchor bar (coordinate is not null)
+                        // Iterate backwards from the last bar
+                        let anchorBar = null;
+                        let anchorLogical = null;
 
-                        // Get last bar's logical index
-                        const lastBarCoord = timeScale.timeToCoordinate(lastBar.time);
-                        if (lastBarCoord !== null) {
-                            const lastBarLogical = timeScale.coordinateToLogical(lastBarCoord);
-                            if (lastBarLogical !== null) {
-                                const targetLogical = lastBarLogical + diffBars;
-                                const targetCoord = timeScale.logicalToCoordinate(targetLogical);
-                                if (targetCoord !== null) return targetCoord;
+                        for (let i = data.length - 1; i >= Math.max(0, data.length - 20); i--) {
+                            const bar = data[i];
+                            const coord = timeScale.timeToCoordinate(bar.time);
+                            if (coord !== null) {
+                                const logical = timeScale.coordinateToLogical(coord);
+                                if (logical !== null) {
+                                    anchorBar = bar;
+                                    anchorLogical = logical;
+                                    break;
+                                }
                             }
+                        }
+
+                        if (anchorBar && anchorLogical !== null) {
+                            const anchorTime = Number(anchorBar.time);
+                            const timeDiff = tTime - anchorTime;
+                            const logicalDiff = timeDiff / interval;
+
+                            const targetLogical = anchorLogical + logicalDiff;
+                            const targetCoord = timeScale.logicalToCoordinate(targetLogical);
+                            if (targetCoord !== null) return targetCoord;
+                        } else {
+                            // Fallback if no visible anchor found (unlikely)
+                            // Just assume last bar is close to end of logical range?
+                            // Or return null to prevent drawing at 0
                         }
                     }
                 }
             }
         } catch (e) {
-            // Ignore errors and fall through
+            // Ignore errors
         }
 
         // 3. Fallback: Interpolate between bars (for past times that don't match exact bar)
