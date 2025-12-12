@@ -334,6 +334,7 @@ export default function Trading() {
                 <th className="py-2">Size</th>
                 <th className="py-2">Entry Price</th>
                 <th className="py-2">Mark Price</th>
+                <th className="py-2">Value</th>
                 <th className="py-2">TP/SL</th>
                 <th className="py-2">PNL</th>
                 <th className="py-2">Lev.</th>
@@ -350,6 +351,7 @@ export default function Trading() {
                   </td>
                   <td className="py-2">${formatNumber(pos.entry_price)}</td>
                   <td className="py-2">${formatNumber(prices[pos.symbol] || 0)}</td>
+                  <td className="py-2">${formatNumber(Math.abs(pos.quantity * pos.entry_price))}</td>
                   <td className="py-2 text-xs">
                     {pos.take_profit_price ? formatNumber(pos.take_profit_price) : '-'} / {pos.stop_loss_price ? formatNumber(pos.stop_loss_price) : '-'}
                   </td>
