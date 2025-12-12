@@ -1586,7 +1586,7 @@ export default function Chart() {
 
         const handleMouseUp = async () => {
             if (dragStateRef.current) {
-                const d = drawings.find(x => x.id === dragStateRef.current.drawingId);
+                const d = drawingsRef.current.find(x => x.id === dragStateRef.current.drawingId);
                 if (d) updateDrawing(d);
 
                 dragStateRef.current = null;
