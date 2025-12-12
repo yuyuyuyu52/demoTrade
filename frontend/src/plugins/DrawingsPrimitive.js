@@ -115,10 +115,18 @@ class DrawingsPaneRenderer {
 
                 const x1 = this._getClosestTimeCoordinate(timeScale, d.p1.time);
                 const y1 = this._series.priceToCoordinate(d.p1.price);
-                const x2 = this._getClosestTimeCoordinate(timeScale, d.p2.time);
+                let x2 = this._getClosestTimeCoordinate(timeScale, d.p2.time);
                 const y2 = this._series.priceToCoordinate(d.p2.price);
 
                 if (x1 === null || y1 === null || x2 === null || y2 === null) return;
+
+                // FIX: Enforce minimum visual width for box-based drawings to prevent disappearing on higher timeframes
+                // When switching to higher timeframes, start and end times might snap to the same bar, causing 0 width.
+                if (['rect', 'long', 'short'].includes(d.type)) {
+                    if (Math.abs(x2 - x1) < 5) {
+                        x2 = x1 + (x2 >= x1 ? 10 : -10);
+                    }
+                }
 
                 ctx.save();
 
