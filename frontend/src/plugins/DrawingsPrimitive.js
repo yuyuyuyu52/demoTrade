@@ -29,9 +29,27 @@ class DrawingsPaneRenderer {
                 const tTime = Number(targetTime);
 
                 if (tTime > lastTime) {
-                    const prevBar = data[data.length - 2];
-                    const prevTime = Number(prevBar.time);
-                    const interval = lastTime - prevTime;
+                    // Calculate a robust interval (ignore gaps like weekends)
+                    // Find minimum positive difference in the last few bars
+                    let interval = Infinity;
+                    let found = false;
+                    const checkCount = Math.min(data.length, 6); // Check last 5 pairs
+
+                    for (let i = 1; i < checkCount; i++) {
+                        const curr = Number(data[data.length - i].time);
+                        const prev = Number(data[data.length - i - 1].time);
+                        const diff = curr - prev;
+                        if (diff > 0 && diff < interval) {
+                            interval = diff;
+                            found = true;
+                        }
+                    }
+
+                    if (!found) {
+                        // Fallback to last pair if logic fails
+                        const prevBar = data[data.length - 2];
+                        interval = lastTime - Number(prevBar.time);
+                    }
 
                     if (interval > 0) {
                         const diffBars = (tTime - lastTime) / interval;
