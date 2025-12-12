@@ -53,46 +53,62 @@ class DrawingsPaneRenderer {
             // Ignore errors and fall through
         }
 
-        // 3. Fallback: Find closest bar (for past times or if extrapolation fails)
-        // Note: accessing data() might be expensive if called frequently. 
-        // Ideally we should cache this or optimize.
+        // 3. Fallback: Interpolate between bars (for past times that don't match exact bar)
         try {
             const data = this._series.data();
             if (!data || data.length === 0) return null;
 
-            // Binary search for closest time
+            // Binary search to find the index of the bar <= tTime
             let left = 0;
             let right = data.length - 1;
-            let closest = data[0];
+            let leftIndex = -1;
 
-            // Handle potential object time (BusinessDay) vs Number (Timestamp) mismatch
-            // Assuming we use timestamps (numbers)
             const tTime = Number(targetTime);
             if (isNaN(tTime)) return null;
 
-            let minDiff = Math.abs((data[0].time) - tTime);
-
             while (left <= right) {
                 const mid = Math.floor((left + right) / 2);
-                const item = data[mid];
-                const itemTime = Number(item.time);
-                const diff = Math.abs(itemTime - tTime);
+                const midTime = Number(data[mid].time);
 
-                if (diff < minDiff) {
-                    minDiff = diff;
-                    closest = item;
+                if (midTime === tTime) {
+                    return timeScale.timeToCoordinate(tTime);
                 }
 
-                if (itemTime < tTime) {
+                if (midTime < tTime) {
+                    leftIndex = mid;
                     left = mid + 1;
-                } else if (itemTime > tTime) {
-                    right = mid - 1;
                 } else {
-                    return timeScale.timeToCoordinate(item.time);
+                    right = mid - 1;
                 }
             }
 
-            return timeScale.timeToCoordinate(closest.time);
+            // If time is before the first bar, clamp to first bar
+            if (leftIndex === -1) {
+                return timeScale.timeToCoordinate(data[0].time);
+            }
+
+            // If time is valid and we have a next bar, interpolate
+            if (leftIndex >= 0 && leftIndex < data.length - 1) {
+                const leftBar = data[leftIndex];
+                const rightBar = data[leftIndex + 1];
+                const leftTime = Number(leftBar.time);
+                const rightTime = Number(rightBar.time);
+
+                const leftX = timeScale.timeToCoordinate(leftBar.time);
+                const rightX = timeScale.timeToCoordinate(rightBar.time);
+
+                if (leftX !== null && rightX !== null) {
+                    const ratio = (tTime - leftTime) / (rightTime - leftTime);
+                    return leftX + (rightX - leftX) * ratio;
+                }
+            }
+
+            // Fallback to snapping if interpolation fails (e.g. rightX is null) or last bar
+            if (leftIndex >= 0) {
+                return timeScale.timeToCoordinate(data[leftIndex].time);
+            }
+
+            return null;
         } catch (e) {
             return null;
         }
