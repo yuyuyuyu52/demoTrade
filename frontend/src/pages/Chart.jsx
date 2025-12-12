@@ -1273,9 +1273,12 @@ export default function Chart() {
                         } else {
                             // Create new price line WITHOUT text label
                             const color = clickedMarker.color;
+                            // Add quantity to label if available
+                            const labelText = clickedMarker.quantity ? `Qty: ${clickedMarker.quantity}` : '';
+
                             addPriceLine(
                                 clickedMarker.originalPrice,
-                                '', // Empty title - no text
+                                labelText, // Show quantity on line
                                 color,
                                 LineStyle.Dashed,
                                 { type: 'HISTORY', id: historyLineId }

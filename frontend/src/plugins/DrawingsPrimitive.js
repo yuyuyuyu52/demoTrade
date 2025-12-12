@@ -35,7 +35,7 @@ class DrawingsPaneRenderer {
 
                     if (interval > 0) {
                         const diffBars = (tTime - lastTime) / interval;
-                        
+
                         // Get last bar's logical index
                         const lastBarCoord = timeScale.timeToCoordinate(lastBar.time);
                         if (lastBarCoord !== null) {
@@ -64,7 +64,7 @@ class DrawingsPaneRenderer {
             let left = 0;
             let right = data.length - 1;
             let closest = data[0];
-            
+
             // Handle potential object time (BusinessDay) vs Number (Timestamp) mismatch
             // Assuming we use timestamps (numbers)
             const tTime = Number(targetTime);
@@ -91,7 +91,7 @@ class DrawingsPaneRenderer {
                     return timeScale.timeToCoordinate(item.time);
                 }
             }
-            
+
             return timeScale.timeToCoordinate(closest.time);
         } catch (e) {
             return null;
@@ -102,14 +102,14 @@ class DrawingsPaneRenderer {
         target.useBitmapCoordinateSpace(scope => {
             const ctx = scope.context;
             const timeScale = this._chart.timeScale();
-            
+
             // Apply scaling for Retina/High-DPI displays
             const horizontalPixelRatio = scope.horizontalPixelRatio || 1;
             const verticalPixelRatio = scope.verticalPixelRatio || 1;
-            
+
             ctx.save();
             ctx.scale(horizontalPixelRatio, verticalPixelRatio);
-            
+
             this._drawings.forEach(d => {
                 if (!d.p1 || !d.p2) return;
 
@@ -121,7 +121,7 @@ class DrawingsPaneRenderer {
                 if (x1 === null || y1 === null || x2 === null || y2 === null) return;
 
                 ctx.save();
-                
+
                 if (d.type === 'line') {
                     this._drawLine(ctx, x1, y1, x2, y2);
                 } else if (d.type === 'rect') {
@@ -140,7 +140,7 @@ class DrawingsPaneRenderer {
 
                 ctx.restore();
             });
-            
+
             ctx.restore(); // Restore the scaling
         });
     }
@@ -188,11 +188,11 @@ class DrawingsPaneRenderer {
 
         levels.forEach(level => {
             const y = y1 + yDiff * level;
-            
+
             ctx.beginPath();
             ctx.moveTo(x1, y);
             ctx.lineTo(x2, y);
-            
+
             ctx.strokeStyle = colors[level] || '#2962FF';
             ctx.lineWidth = 1;
             ctx.stroke();
@@ -207,16 +207,16 @@ class DrawingsPaneRenderer {
     _drawPosition(ctx, x1, y1, x2, y2, type, d) {
         // x1, y1 is Entry
         // x2, y2 is Stop Loss (visually) - we use x2 for width
-        
+
         let targetY;
-        
+
         if (d && d.p3) {
             // Apply bounds check/validation if needed
-             targetY = this._series.priceToCoordinate(d.p3.price);
-             if (targetY === null) {
-                 const yDiff = y2 - y1;
-                 targetY = y1 - yDiff * 2;
-             }
+            targetY = this._series.priceToCoordinate(d.p3.price);
+            if (targetY === null) {
+                const yDiff = y2 - y1;
+                targetY = y1 - yDiff * 2;
+            }
         } else {
             // Fallback calculation for old drawings or during creation
             const yDiff = y2 - y1;
@@ -231,7 +231,7 @@ class DrawingsPaneRenderer {
         ctx.rect(x1, y1, x2 - x1, y2 - y1);
         ctx.fill();
         ctx.stroke();
-        
+
         // Draw Take Profit Box (Green)
         ctx.fillStyle = 'rgba(0, 230, 118, 0.2)';
         ctx.strokeStyle = '#00E676';
@@ -240,25 +240,56 @@ class DrawingsPaneRenderer {
         ctx.rect(x1, y1, x2 - x1, targetY - y1);
         ctx.fill();
         ctx.stroke();
-        
+
         // Draw Entry Line
         ctx.beginPath();
         ctx.moveTo(x1, y1);
         ctx.lineTo(x2, y1);
         ctx.strokeStyle = '#787B86';
         ctx.stroke();
-        
+
         // Draw Labels
         ctx.fillStyle = '#00E676';
         ctx.font = '12px sans-serif';
         // Ensure coords are valid numbers
         if (!isNaN(x2) && !isNaN(targetY)) {
-             ctx.fillText('Target', x2 + 5, targetY);
+            ctx.fillText('Target', x2 + 5, targetY);
         }
-        
+
         ctx.fillStyle = '#FF5252';
         if (!isNaN(x2) && !isNaN(y2)) {
             ctx.fillText('Stop', x2 + 5, y2);
+        }
+
+        // Draw Risk/Reward Ratio
+        // Risk = |Entry - SL|, Reward = |Target - Entry|
+        // Use coordinates to calculate ratio visually or price if available
+        // Using coordinates is easier for drawing
+        const entryY = y1;
+        const slY = y2;
+        const tpY = targetY;
+
+        if (!isNaN(entryY) && !isNaN(slY) && !isNaN(tpY)) {
+            const risk = Math.abs(entryY - slY);
+            const reward = Math.abs(tpY - entryY);
+
+            if (risk > 0) {
+                const ratio = reward / risk;
+                const ratioText = `${ratio.toFixed(2)}`;
+
+                ctx.fillStyle = 'black';
+                ctx.font = 'bold 12px sans-serif';
+                ctx.textAlign = 'center';
+                // Draw in the middle of the box width, on the boundary line between Entry and SL?
+                // Request said "on the boundary line" (wait, "on the boundary line between bull/bear"? No, "on the boundary line display ratio")
+                // Usually it's displayed in the middle of the drawing. Let's put it in the middle of the SL/TP divider (Entry Line) or just below it.
+                // User said "display on boundary line... black... no line under it".
+                // I'll put it on the Entry line (y1), centered horizontally.
+                const centerX = (x1 + x2) / 2;
+                ctx.fillText(ratioText, centerX, y1 + 4); // Slightly below entry line to not overlap too much? Or slightly above?
+                // Let's try slightly above centered.
+                ctx.textAlign = 'left'; // Reset
+            }
         }
     }
 
@@ -278,37 +309,37 @@ class DrawingsPaneRenderer {
         if (type === 'long' || type === 'short') {
             // Anchor 0: Entry Point (Left) - p1
             drawPoint(x1, y1);
-            
+
             // Anchor 1: SL Point (Right) - p2
             drawPoint(x2, y2);
-            
+
             // Anchor 2: Target Point (Right) - p3
             let targetY;
             if (d && d.p3) {
-                 targetY = this._series.priceToCoordinate(d.p3.price);
-                 if (targetY === null) {
+                targetY = this._series.priceToCoordinate(d.p3.price);
+                if (targetY === null) {
                     const yDiff = y2 - y1;
                     targetY = y1 - yDiff * 2;
-                 }
+                }
             } else {
-                 const yDiff = y2 - y1;
-                 targetY = y1 - yDiff * 2;
+                const yDiff = y2 - y1;
+                targetY = y1 - yDiff * 2;
             }
-             
+
             if (targetY !== null && !isNaN(targetY)) {
                 drawPoint(x2, targetY);
             }
-            
+
             // Anchor 3: Width Control (Right Entry)
             drawPoint(x2, y1);
-            
+
         } else {
             drawPoint(x1, y1);
             drawPoint(x2, y2);
-            
+
             if (type === 'rect') {
-                 drawPoint(x1, y2);
-                 drawPoint(x2, y1);
+                drawPoint(x1, y2);
+                drawPoint(x2, y1);
             }
         }
     }
@@ -320,7 +351,7 @@ export class DrawingsPrimitive {
         this._series = null;
         this._chart = null;
         this._selectedId = null;
-        this._requestUpdate = () => {};
+        this._requestUpdate = () => { };
     }
 
     attached({ chart, series, requestUpdate }) {
@@ -332,7 +363,7 @@ export class DrawingsPrimitive {
     detached() {
         this._chart = null;
         this._series = null;
-        this._requestUpdate = () => {};
+        this._requestUpdate = () => { };
     }
 
     setDrawings(drawings) {
