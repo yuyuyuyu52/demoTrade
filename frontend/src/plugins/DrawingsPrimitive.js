@@ -20,15 +20,18 @@ class DrawingsPaneRenderer {
             // Continue to fallback
         }
 
-        // 2. Extrapolate for future time
+        // 2. Extrapolate for past or future time (handles both directions)
         try {
             const data = this._series.data();
             if (data && data.length >= 2) {
+                const firstBar = data[0];
                 const lastBar = data[data.length - 1];
+                const firstTime = Number(firstBar.time);
                 const lastTime = Number(lastBar.time);
                 const tTime = Number(targetTime);
 
-                if (tTime > lastTime) {
+                // Check if time is outside the data range
+                if (tTime > lastTime || tTime < firstTime) {
                     // Calculate a robust interval (ignore gaps like weekends)
                     let interval = Infinity;
                     const checkCount = Math.min(data.length, 10);
@@ -48,13 +51,16 @@ class DrawingsPaneRenderer {
                     }
 
                     if (interval > 0) {
-                        // Find a valid anchor bar (coordinate is not null)
-                        // Iterate backwards from the last bar
+                        // Find the appropriate anchor bar based on direction
                         let anchorBar = null;
                         let anchorLogical = null;
 
-                        for (let i = data.length - 1; i >= Math.max(0, data.length - 20); i--) {
-                            const bar = data[i];
+                        // For future time, use last bar; for past time, use first bar
+                        const searchData = tTime > lastTime ?
+                            data.slice().reverse() :
+                            data.slice(0, Math.min(20, data.length));
+
+                        for (const bar of searchData) {
                             const coord = timeScale.timeToCoordinate(bar.time);
                             if (coord !== null) {
                                 const logical = timeScale.coordinateToLogical(coord);
@@ -74,10 +80,6 @@ class DrawingsPaneRenderer {
                             const targetLogical = anchorLogical + logicalDiff;
                             const targetCoord = timeScale.logicalToCoordinate(targetLogical);
                             if (targetCoord !== null) return targetCoord;
-                        } else {
-                            // Fallback if no visible anchor found (unlikely)
-                            // Just assume last bar is close to end of logical range?
-                            // Or return null to prevent drawing at 0
                         }
                     }
                 }
@@ -115,9 +117,10 @@ class DrawingsPaneRenderer {
                 }
             }
 
-            // If time is before the first bar, clamp to first bar
+            // If time is before the first bar, return null instead of clamping
+            // This prevents control points from sticking to the left side when switching timeframes
             if (leftIndex === -1) {
-                return timeScale.timeToCoordinate(data[0].time);
+                return null;
             }
 
             // If time is valid and we have a next bar, interpolate
