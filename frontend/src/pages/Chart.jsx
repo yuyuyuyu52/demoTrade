@@ -1108,7 +1108,13 @@ export default function Chart() {
                         // Second Click: Finish Drawing
                         const tempId = `temp_${Date.now()}_${Math.random()}`;
 
-                        let finalP2 = { time, price }; // from mouse
+                        let targetPrice = price;
+                        // Shift key for horizontal line
+                        if (e.shiftKey) {
+                            targetPrice = currentDrawingRef.current.p1.price;
+                        }
+
+                        let finalP2 = { time, price: targetPrice }; // from mouse
                         let finalP3 = null; // Target for Long/Short
 
                         // For Long/Short, calculate initial TP (p3)
