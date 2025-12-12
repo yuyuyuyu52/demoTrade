@@ -27,6 +27,8 @@ class OrderResponse(BaseModel):
     fee: float
     status: OrderStatus
     leverage: int
+    take_profit_price: Optional[float] = None
+    stop_loss_price: Optional[float] = None
     created_at: datetime
     updated_at: datetime
 
