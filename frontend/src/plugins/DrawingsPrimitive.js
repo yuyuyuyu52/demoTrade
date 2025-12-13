@@ -312,15 +312,21 @@ class DrawingsPaneRenderer {
 
         // Draw Risk/Reward Ratio
         // Risk = |Entry - SL|, Reward = |Target - Entry|
-        // Use coordinates to calculate ratio visually or price if available
-        // Using coordinates is easier for drawing
-        const entryY = y1;
-        const slY = y2;
-        const tpY = targetY;
+        // Use PRICES instead of coordinates to ensure accuracy (e.g. in Log scale)
 
-        if (!isNaN(entryY) && !isNaN(slY) && !isNaN(tpY)) {
-            const risk = Math.abs(entryY - slY);
-            const reward = Math.abs(tpY - entryY);
+        const entryPrice = Number(d.p1?.price);
+        const slPrice = Number(d.p2?.price);
+        let tpPrice = d.p3 ? Number(d.p3.price) : NaN;
+
+        if (!isNaN(entryPrice) && !isNaN(slPrice)) {
+            // If tpPrice is not defined, we can't calculate R/R accurately unless we infer it from the visual default.
+            if (isNaN(tpPrice)) {
+                const priceDiff = entryPrice - slPrice;
+                tpPrice = entryPrice + priceDiff * 2;
+            }
+
+            const risk = Math.abs(entryPrice - slPrice);
+            const reward = Math.abs(tpPrice - entryPrice);
 
             if (risk > 0) {
                 const ratio = reward / risk;
@@ -329,14 +335,11 @@ class DrawingsPaneRenderer {
                 ctx.fillStyle = 'black';
                 ctx.font = 'bold 12px sans-serif';
                 ctx.textAlign = 'center';
-                // Draw in the middle of the box width, on the boundary line between Entry and SL?
-                // Request said "on the boundary line" (wait, "on the boundary line between bull/bear"? No, "on the boundary line display ratio")
-                // Usually it's displayed in the middle of the drawing. Let's put it in the middle of the SL/TP divider (Entry Line) or just below it.
-                // User said "display on boundary line... black... no line under it".
-                // I'll put it on the Entry line (y1), centered horizontally.
+
+                // Position logic: Center on the Entry Line
                 const centerX = (x1 + x2) / 2;
-                ctx.fillText(ratioText, centerX, y1 + 4); // Slightly below entry line to not overlap too much? Or slightly above?
-                // Let's try slightly above centered.
+                ctx.fillText(ratioText, centerX, y1 + 4);
+
                 ctx.textAlign = 'left'; // Reset
             }
         }

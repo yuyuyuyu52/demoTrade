@@ -6,8 +6,7 @@ from typing import List
 from app.database import get_db
 from app.models import Order, Account, OrderType, OrderStatus
 from app.schemas import OrderCreate, OrderResponse, OrderUpdate
-from app.services.matching_engine import matching_engine
-from app.services.binance_ws import get_current_price
+
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -36,23 +35,10 @@ async def create_order(order_in: OrderCreate, db: AsyncSession = Depends(get_db)
     await db.commit()
     await db.refresh(new_order)
 
-    # If Market Order, try to execute immediately
-    if new_order.order_type == OrderType.MARKET:
-        current_price = get_current_price(new_order.symbol)
-        if current_price:
-            # Execute immediately
-            # Note: In a real system, we might want to lock the row or handle this more carefully
-            # Re-fetching or passing the object might be tricky with async session if not careful, 
-            # but here we pass the session and the object.
-            await matching_engine.execute_trade(db, new_order, current_price)
-            await db.refresh(new_order)
-        else:
-            # If no price available, maybe reject or leave as NEW?
-            # For now, leave as NEW, the background task will pick it up when price is available?
-            # Actually background task only looks for LIMIT orders in my implementation.
-            # Let's update background task to handle MARKET too or reject here.
-            pass 
-
+    # If Market Order, the matching engine will pick it up automatically
+    # We do NOT execute it here to avoid race conditions and double execution
+    # if the background task picks it up at the same time.
+    
     return new_order
 
 @router.get("/", response_model=List[OrderResponse])
@@ -67,7 +53,8 @@ async def cancel_order(order_id: int, db: AsyncSession = Depends(get_db)):
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     
-    if order.status != OrderStatus.NEW:
+    # Allow cancelling NEW and PARTIALLY_FILLED orders
+    if order.status not in [OrderStatus.NEW, OrderStatus.PARTIALLY_FILLED]:
         raise HTTPException(status_code=400, detail="Order cannot be cancelled")
 
     order.status = OrderStatus.CANCELED
@@ -81,14 +68,21 @@ async def update_order(order_id: int, order_update: OrderUpdate, db: AsyncSessio
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     
-    if order.status != OrderStatus.NEW:
-        raise HTTPException(status_code=400, detail="Cannot update order that is not NEW")
+    # Allow updating NEW and PARTIALLY_FILLED orders
+    if order.status not in [OrderStatus.NEW, OrderStatus.PARTIALLY_FILLED]:
+        raise HTTPException(status_code=400, detail="Cannot update order that is not NEW or PARTIALLY_FILLED")
 
-    if order_update.price is not None:
-        order.limit_price = order_update.price
+    # Limit Price and Quantity usually shouldn't be changed if partially filled, 
+    # but for simplicity we allow it or restrict it only for NEW. 
+    # Let's restrict core parameters to NEW only to strictly follow standard exchange logic,
+    # but allow TP/SL for both.
     
-    if (order_update.quantity is not None):
-        order.quantity = order_update.quantity
+    if order.status == OrderStatus.NEW:
+        if order_update.price is not None:
+            order.limit_price = order_update.price
+        
+        if (order_update.quantity is not None):
+            order.quantity = order_update.quantity
 
     if (order_update.take_profit_price is not None):
         order.take_profit_price = order_update.take_profit_price
