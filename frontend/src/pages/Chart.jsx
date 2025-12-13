@@ -2071,11 +2071,19 @@ export default function Chart({
                         height: chartContainerRef.current.clientHeight
                     });
                 } catch (e) {
-                    // Ignore resize errors during disposal
+                    // Ignore resize errors
                 }
             }
         };
-        window.addEventListener('resize', handleResize);
+
+        const resizeObserver = new ResizeObserver(() => {
+            // Use requestAnimationFrame to avoid "ResizeObserver loop limit exceeded" 
+            requestAnimationFrame(() => handleResize());
+        });
+
+        if (chartContainerRef.current) {
+            resizeObserver.observe(chartContainerRef.current);
+        }
 
         // Sync labels loop
         let animationFrameId;
@@ -2110,7 +2118,7 @@ export default function Chart({
 
         return () => {
             isDisposed = true; // Mark as disposed
-            window.removeEventListener('resize', handleResize);
+            if (resizeObserver) resizeObserver.disconnect();
             cancelAnimationFrame(animationFrameId);
             clearInterval(overlayInterval);
             if (scrollTimeout) clearTimeout(scrollTimeout);
