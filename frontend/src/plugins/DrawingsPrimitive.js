@@ -106,6 +106,13 @@ class DrawingsPaneRenderer {
                 const leftTime = Number(leftBar.time);
                 const rightTime = Number(rightBar.time);
 
+                // FIX: Snap to left bar if time is within its interval (handling low->high timeframe switch)
+                const interval = this._interval || 60;
+                if (tTime < leftTime + interval) {
+                    const snapCoord = timeScale.timeToCoordinate(leftBar.time);
+                    if (snapCoord !== null) return snapCoord;
+                }
+
                 const leftX = timeScale.timeToCoordinate(leftBar.time);
                 const rightX = timeScale.timeToCoordinate(rightBar.time);
 

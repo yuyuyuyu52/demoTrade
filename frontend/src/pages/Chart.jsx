@@ -484,33 +484,63 @@ export default function Chart() {
                     }
                 } else {
                     // Time is in the past but timeToCoordinate failed (maybe zoomed in/out or not exact bar)
-                    // Try to find closest bar
-                    // Binary search
+
+                    // FIX: Try to find containing bar first (consistent with DrawingsPrimitive)
                     let left = 0;
                     let right = data.length - 1;
-                    let closest = data[0];
-                    let minDiff = Math.abs(data[0].time - tTime);
+                    let floorIndex = -1;
 
                     while (left <= right) {
                         const mid = Math.floor((left + right) / 2);
-                        const item = data[mid];
-                        const diff = Math.abs(item.time - tTime);
-
-                        if (diff < minDiff) {
-                            minDiff = diff;
-                            closest = item;
-                        }
-
-                        if (item.time < tTime) {
-                            left = mid + 1;
-                        } else if (item.time > tTime) {
-                            right = mid - 1;
-                        } else {
-                            closest = item;
+                        if (data[mid].time === tTime) {
+                            x = timeScale.timeToCoordinate(data[mid].time);
                             break;
                         }
+                        if (data[mid].time < tTime) {
+                            floorIndex = mid;
+                            left = mid + 1;
+                        } else {
+                            right = mid - 1;
+                        }
                     }
-                    x = timeScale.timeToCoordinate(closest.time);
+
+                    if (x === null && floorIndex !== -1) {
+                        const floorBar = data[floorIndex];
+                        const tfSeconds = timeframeToSeconds(timeframe);
+                        if (tTime < floorBar.time + tfSeconds) {
+                            x = timeScale.timeToCoordinate(floorBar.time);
+                        }
+                    }
+
+                    // Fallback to closest if still null (e.g. in a gap)
+                    if (x === null) {
+                        // Binary search for closest
+                        left = 0;
+                        right = data.length - 1;
+                        let closest = data[0];
+                        let minDiff = Math.abs(data[0].time - tTime);
+
+                        while (left <= right) {
+                            const mid = Math.floor((left + right) / 2);
+                            const item = data[mid];
+                            const diff = Math.abs(item.time - tTime);
+
+                            if (diff < minDiff) {
+                                minDiff = diff;
+                                closest = item;
+                            }
+
+                            if (item.time < tTime) {
+                                left = mid + 1;
+                            } else if (item.time > tTime) {
+                                right = mid - 1;
+                            } else {
+                                closest = item;
+                                break;
+                            }
+                        }
+                        x = timeScale.timeToCoordinate(closest.time);
+                    }
                 }
             } catch (e) {
                 console.error("Error extrapolating coordinate", e);
