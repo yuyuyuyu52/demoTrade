@@ -18,24 +18,34 @@ class DrawingsPaneRenderer {
         if (isNaN(tTime)) return null;
 
         const data = this._series.data();
-        if (!data || data.length === 0) return null;
+        if (!data || data.length === 0) {
+            console.log('[Drawing] No data available');
+            return null;
+        }
 
         const lastBar = data[data.length - 1];
         const lastTime = Number(lastBar.time);
 
+        console.log('[Drawing] Target time:', tTime, 'Last bar time:', lastTime, 'Interval:', this._interval, 'Is Future:', tTime > lastTime);
+
         // 1. Future Time: Strictly project from the last known bar
-        // We do this BEFORE timeToCoordinate to avoid LWC returning weird values for future times
         if (tTime > lastTime) {
             // We use the last bar as the anchor
             let lastBarCoord = timeScale.timeToCoordinate(lastBar.time);
+            console.log('[Drawing] Future: lastBarCoord =', lastBarCoord);
 
-            // If last bar is off-screen, timeToCoordinate might return null in some modes,
-            // but for a continuous time scale it usually returns a value (even if negative/large).
-            // If it returns null, we can't anchor.
-            if (lastBarCoord === null) return null;
+            if (lastBarCoord === null) {
+                console.log('[Drawing] Future: lastBarCoord is null, cannot anchor');
+                return null;
+            }
 
             const lastBarLogical = timeScale.coordinateToLogical(lastBarCoord);
-            if (lastBarLogical === null) return null;
+            console.log('[Drawing] Future: lastBarLogical =', lastBarLogical);
+
+            if (lastBarLogical === null) {
+                console.log('[Drawing] Future: lastBarLogical is null');
+                return null;
+            }
 
             // Calculate how many "bars" away the target is
             const timeDiff = tTime - lastTime;
@@ -44,7 +54,11 @@ class DrawingsPaneRenderer {
             const logicalDiff = timeDiff / interval;
             const targetLogical = lastBarLogical + logicalDiff;
 
+            console.log('[Drawing] Future: timeDiff =', timeDiff, 'logicalDiff =', logicalDiff, 'targetLogical =', targetLogical);
+
             const targetCoord = timeScale.logicalToCoordinate(targetLogical);
+            console.log('[Drawing] Future: targetCoord =', targetCoord);
+
             return targetCoord;
         }
 
