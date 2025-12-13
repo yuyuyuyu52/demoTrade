@@ -928,20 +928,26 @@ export default function Chart({
                             aggregatedMarkersMap.set(key, {
                                 time: o.normalizedTime,
                                 side: o.side,
-                                quantity: 0,
+                                quantitySum: 0, // Use integer math or high precision if possible, but simplest is multiplied
                                 prices: [],
                                 count: 0,
                                 id: o.id // Use first ID as representative
                             });
                         }
                         const entry = aggregatedMarkersMap.get(key);
-                        entry.quantity += parseFloat(o.quantity);
+                        // Add with multiplier to avoid float dust
+                        // Assuming max 8 decimals for crypto
+                        const qty = parseFloat(o.quantity);
+                        entry.quantitySum += Math.round(qty * 100000000);
                         entry.prices.push(o.originalPrice);
                         entry.count += 1;
                     });
 
                     const markers = Array.from(aggregatedMarkersMap.values()).map(m => {
                         const avgPrice = m.prices.reduce((a, b) => a + b, 0) / m.count;
+                        // Restore aggregated quantity
+                        const totalQty = m.quantitySum / 100000000;
+
                         return {
                             time: m.time,
                             position: m.side === 'BUY' ? 'belowBar' : 'aboveBar',
@@ -950,7 +956,7 @@ export default function Chart({
                             text: '', // Text handled by price line on click
                             originalPrice: avgPrice,
                             side: m.side,
-                            quantity: m.quantity, // Total quantity
+                            quantity: totalQty, // Clean number
                             id: m.id
                         };
                     });
@@ -2207,16 +2213,21 @@ export default function Chart({
 
     return (
         <div
-            className={`flex flex-col h-full bg-white relative transition-all ${isActive ? 'ring-2 ring-inset ring-blue-500 z-10' : 'hover:ring-2 hover:ring-inset hover:ring-gray-300'}`}
-            onClick={onActivate}
+            className="flex flex-col h-full bg-white relative group"
+            onMouseDownCapture={onActivate} // Use capture to ensure we get the event before children consume it
         >
+            {/* Active/Hover Border Overlay - pointer-events-none so it doesn't block clicks */}
+            <div className={`absolute inset-0 pointer-events-none z-20 border-2 transition-colors duration-200 ${isActive ? 'border-blue-500' : 'border-transparent group-hover:border-gray-300'
+                }`} />
+
             {/* Settings Modal - Local state controlled by signal prop */}
             {showSettings && (
                 <div
                     className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+                    onMouseDown={(e) => { e.stopPropagation(); }} // Stop propagation specifically for modal bg
                     onClick={(e) => { e.stopPropagation(); setShowSettings(false); }}
                 >
-                    <div className="bg-white p-6 rounded-lg shadow-xl w-64" onClick={e => e.stopPropagation()}>
+                    <div className="bg-white p-6 rounded-lg shadow-xl w-64" onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
                         <h3 className="text-lg font-bold mb-4">Chart Settings</h3>
 
                         <div className="space-y-4">
@@ -2259,7 +2270,7 @@ export default function Chart({
             )}
 
             {error && (
-                <div className="absolute top-2 left-2 right-2 p-2 bg-red-100 text-red-700 rounded z-20 text-xs">
+                <div className="absolute top-2 left-2 right-2 p-2 bg-red-100 text-red-700 rounded z-20 text-xs text-center border border-red-200 shadow-sm">
                     {error}
                 </div>
             )}
