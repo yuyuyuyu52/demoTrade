@@ -17,33 +17,28 @@ class DrawingsPaneRenderer {
         const tTime = Number(targetTime);
         if (isNaN(tTime)) return null;
 
-        // 1. Try direct conversion first (LWC handles visible existing bars well)
-        try {
-            const coord = timeScale.timeToCoordinate(tTime);
-            if (coord !== null) return coord;
-        } catch (e) { }
-
         const data = this._series.data();
-        // If no data, we can't anchor anything.
         if (!data || data.length === 0) return null;
 
         const lastBar = data[data.length - 1];
         const lastTime = Number(lastBar.time);
 
-        // 2. Future Time: Strictly project from the last known bar
+        // 1. Future Time: Strictly project from the last known bar
+        // We do this BEFORE timeToCoordinate to avoid LWC returning weird values for future times
         if (tTime > lastTime) {
             // We use the last bar as the anchor
-            const lastBarCoord = timeScale.timeToCoordinate(lastBar.time);
-            if (lastBarCoord === null) return null; // Should not happen if data is valid
+            let lastBarCoord = timeScale.timeToCoordinate(lastBar.time);
+
+            // If last bar is off-screen, timeToCoordinate might return null in some modes,
+            // but for a continuous time scale it usually returns a value (even if negative/large).
+            // If it returns null, we can't anchor.
+            if (lastBarCoord === null) return null;
 
             const lastBarLogical = timeScale.coordinateToLogical(lastBarCoord);
             if (lastBarLogical === null) return null;
 
-            // Calculate how many "bars" away the target is, based on the fixed timeframe interval
-            // This is the core "simple logic": Time Diff / SecondsPerBar
+            // Calculate how many "bars" away the target is
             const timeDiff = tTime - lastTime;
-
-            // Use the trusted interval passed from Chart/Context, defaulting to 1m (60s) if missing
             const interval = this._interval || 60;
 
             const logicalDiff = timeDiff / interval;
@@ -52,6 +47,12 @@ class DrawingsPaneRenderer {
             const targetCoord = timeScale.logicalToCoordinate(targetLogical);
             return targetCoord;
         }
+
+        // 2. Present/Past: Try direct conversion
+        try {
+            const coord = timeScale.timeToCoordinate(tTime);
+            if (coord !== null) return coord;
+        } catch (e) { }
 
         // 3. Past Time (but timeToCoordinate failed, likely due to zoom/gaps/not exact bar match)
         // We linear interpolate between the two closest bars.
