@@ -31,6 +31,13 @@ class DrawingsPaneRenderer {
             const lastBarCoord = timeScale.timeToCoordinate(lastBar.time);
             if (lastBarCoord === null) return null;
 
+            // FIX: If the time is within the last bar's duration, snap to it.
+            // This prevents "future" drift for points that form the current candle (especially on high TFs like 1w)
+            const interval = this._interval || 60;
+            if (tTime < lastTime + interval) {
+                return lastBarCoord;
+            }
+
             // Calculate pixels per bar from the last two data points
             let pixelsPerBar = 10; // Default fallback
             if (data.length >= 2) {
@@ -43,7 +50,6 @@ class DrawingsPaneRenderer {
 
             // Calculate how many "bars" into the future
             const timeDiff = tTime - lastTime;
-            const interval = this._interval || 60;
             const barsDiff = timeDiff / interval;
 
             // Simply add the pixel offset to the last bar's coordinate

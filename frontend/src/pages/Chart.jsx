@@ -463,21 +463,27 @@ export default function Chart() {
                 const tTime = Number(time);
 
                 if (tTime > lastTime) {
-                    const prevBar = data[data.length - 2];
-                    const prevTime = Number(prevBar.time);
-                    const interval = lastTime - prevTime;
+                    // FIX: Snap to last bar if within its interval (e.g. current week in 1w)
+                    const tfSeconds = timeframeToSeconds(timeframe);
+                    if (tTime < lastTime + tfSeconds) {
+                        x = timeScale.timeToCoordinate(lastBar.time);
+                    } else {
+                        const prevBar = data[data.length - 2];
+                        const prevTime = Number(prevBar.time);
+                        const interval = lastTime - prevTime;
 
-                    if (interval > 0) {
-                        const diffBars = (tTime - lastTime) / interval;
+                        if (interval > 0) {
+                            const diffBars = (tTime - lastTime) / interval;
 
-                        const lastBarCoord = timeScale.timeToCoordinate(lastBar.time);
-                        if (lastBarCoord !== null) {
-                            const lastBarLogical = timeScale.coordinateToLogical(lastBarCoord);
-                            if (lastBarLogical !== null) {
-                                const targetLogical = lastBarLogical + diffBars;
-                                const targetCoord = timeScale.logicalToCoordinate(targetLogical);
-                                if (targetCoord !== null) {
-                                    x = targetCoord;
+                            const lastBarCoord = timeScale.timeToCoordinate(lastBar.time);
+                            if (lastBarCoord !== null) {
+                                const lastBarLogical = timeScale.coordinateToLogical(lastBarCoord);
+                                if (lastBarLogical !== null) {
+                                    const targetLogical = lastBarLogical + diffBars;
+                                    const targetCoord = timeScale.logicalToCoordinate(targetLogical);
+                                    if (targetCoord !== null) {
+                                        x = targetCoord;
+                                    }
                                 }
                             }
                         }
