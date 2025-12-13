@@ -58,3 +58,16 @@ async def websocket_endpoint(websocket: WebSocket, symbol: str, interval: str):
             await websocket.close()
         except:
             pass
+@router.websocket("/ws/prices")
+async def websocket_prices(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            prices = get_all_prices()
+            if prices:
+                await websocket.send_json(prices)
+            await asyncio.sleep(0.5) # Update every 500ms
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        print(f"Price WebSocket error: {e}")

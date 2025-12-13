@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 
@@ -18,7 +18,7 @@ export default function Trading() {
     stop_loss_price: ''
   });
   const [loading, setLoading] = useState(false);
-  const [notification, setNotification] = useState(null); // { text, type: 'success'|'error' }
+  const [notification, setNotification] = useState(null);
   const [initialLoad, setInitialLoad] = useState(true);
   const [tpSlModal, setTpSlModal] = useState({
     isOpen: false,
@@ -27,14 +27,59 @@ export default function Trading() {
     stop_loss_price: ''
   });
 
-  // Auto-dismiss notification
+  // WebSocket for Prices
   useEffect(() => {
-    if (notification) {
-      const timer = setTimeout(() => setNotification(null), 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [notification]);
+    let ws = null;
+    let reconnectTimeout = null;
 
+    const connect = () => {
+      // Construct WS URL based on current window location
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host;
+      // Connect to /api/market/ws/prices
+      // Note: Vite proxy usually handles /api -> backend:8000
+      // If connecting directly to backend port 8000: `ws://localhost:8000/market/ws/prices`
+      // But better to go through same origin if proxy is set up for WS.
+      // Assuming Vite proxy configures /api specifically.
+      // If it fails, we might need full URL.
+      const url = `${protocol}//${host}/api/market/ws/prices`;
+
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        console.log('Price WS Connected');
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          setPrices(data);
+        } catch (e) {
+          console.error('Error parsing price data', e);
+        }
+      };
+
+      ws.onclose = () => {
+        console.log('Price WS Closed, reconnecting...');
+        reconnectTimeout = setTimeout(connect, 3000);
+      };
+
+      ws.onerror = (err) => {
+        console.error('Price WS Error', err);
+        ws.close();
+      };
+    };
+
+    connect();
+
+    return () => {
+      if (ws) ws.close();
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+    };
+  }, []);
+
+  // Poll Account (Orders/Positions) - Keep polling but slightly less frequent maybe? 
+  // 1s is fine for "instant" feel if we are not doing WS for account yet.
   useEffect(() => {
     if (user) {
       fetchAccount();
@@ -43,11 +88,13 @@ export default function Trading() {
     }
   }, [user]);
 
+  // Auto-dismiss notification
   useEffect(() => {
-    fetchPrices();
-    const interval = setInterval(fetchPrices, 1000);
-    return () => clearInterval(interval);
-  }, []);
+    if (notification) {
+      const timer = setTimeout(() => setNotification(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification]);
 
   const fetchAccount = async () => {
     try {
@@ -79,15 +126,6 @@ export default function Trading() {
     saveLeverage(orderForm.leverage);
   };
 
-  const fetchPrices = async () => {
-    try {
-      const res = await axios.get(`${API_URL}/market/prices`);
-      setPrices(res.data);
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
   const placeOrder = async (side) => {
     setLoading(true);
     try {
@@ -113,7 +151,6 @@ export default function Trading() {
   };
 
   const closePosition = async (pos) => {
-    // Removed window.confirm for one-click close
     setLoading(true);
     try {
       const side = pos.quantity > 0 ? 'SELL' : 'BUY';
@@ -176,6 +213,32 @@ export default function Trading() {
   const formatQuantity = (num) => num ? parseFloat(Number(num).toFixed(6)) : 0;
   const formatDate = (dateStr) => new Date(dateStr).toLocaleTimeString();
 
+  // Dynamic PNL Calculation
+  const { totalUnrealizedPnl, positionsWithPnl } = useMemo(() => {
+    if (!account || !account.positions) return { totalUnrealizedPnl: 0, positionsWithPnl: [] };
+
+    let totalPnl = 0;
+    const updatedPositions = account.positions.map(pos => {
+      const currentPrice = prices[pos.symbol] || pos.entry_price; // Fallback to entry if no price yet
+      // PNL = (Current - Entry) * Qty
+      // If Short (Qty < 0): (Current - Entry) * (-5) = (Entry - Current) * 5?
+      // Math: (-10) * (110 - 100) = -100 (Loss on Long logic? No)
+      // Long: 10 * (110 - 100) = 100 (Profit)
+      // Short: -10 * (90 - 100) = -10 * (-10) = 100 (Profit)
+      const pnl = (currentPrice - pos.entry_price) * pos.quantity;
+      totalPnl += pnl;
+
+      return {
+        ...pos,
+        currentPrice,
+        unrealized_pnl: pnl, // Override backend value for display
+        value: Math.abs(currentPrice * pos.quantity)
+      };
+    });
+
+    return { totalUnrealizedPnl: totalPnl, positionsWithPnl: updatedPositions };
+  }, [account, prices]);
+
   if (!account) return <div>Loading account...</div>;
 
   return (
@@ -183,8 +246,8 @@ export default function Trading() {
       {/* Notification Toast */}
       {notification && (
         <div className={`fixed top-4 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-lg shadow-xl z-[100] text-sm font-semibold animate-fade-in-down border ${notification.type === 'error'
-            ? 'bg-red-50 border-red-200 text-red-700'
-            : 'bg-green-50 border-green-200 text-green-700'
+          ? 'bg-red-50 border-red-200 text-red-700'
+          : 'bg-green-50 border-green-200 text-green-700'
           }`}>
           {notification.text}
         </div>
@@ -325,18 +388,18 @@ export default function Trading() {
           </div>
           <div>
             <p className="text-gray-600">Unrealized PNL</p>
-            <p className={`font-bold ${account.unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              ${formatNumber(account.unrealized_pnl)}
+            <p className={`font-bold ${totalUnrealizedPnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              ${formatNumber(totalUnrealizedPnl)}
             </p>
           </div>
           <div>
             <p className="text-gray-600">Equity</p>
-            <p className="font-bold text-blue-600">${formatNumber(account.equity)}</p>
+            <p className="font-bold text-blue-600">${formatNumber(account.balance + totalUnrealizedPnl)}</p>
           </div>
         </div>
 
         <h3 className="font-semibold mt-4 mb-2">Positions</h3>
-        {(!account?.positions?.length) ? (
+        {(!positionsWithPnl?.length) ? (
           <div className="text-gray-500 italic">No open positions</div>
         ) : (
           <table className="w-full text-left border-collapse">
@@ -355,15 +418,15 @@ export default function Trading() {
               </tr>
             </thead>
             <tbody>
-              {account.positions.map((pos) => (
+              {positionsWithPnl.map((pos) => (
                 <tr key={pos.symbol} className="border-b last:border-0 hover:bg-gray-50 transition-colors">
                   <td className="py-2">{pos.symbol}</td>
                   <td className={`py-2 ${pos.quantity > 0 ? 'text-green-600' : 'text-red-600'}`}>
                     {formatQuantity(pos.quantity)}
                   </td>
                   <td className="py-2">${formatNumber(pos.entry_price)}</td>
-                  <td className="py-2">${formatNumber(prices[pos.symbol] || 0)}</td>
-                  <td className="py-2">${formatNumber(Math.abs(pos.quantity * pos.entry_price))}</td>
+                  <td className="py-2">${formatNumber(pos.currentPrice)}</td>
+                  <td className="py-2">${formatNumber(pos.value)}</td>
                   <td className="py-2 text-xs">
                     {pos.take_profit_price ? formatNumber(pos.take_profit_price) : '-'} / {pos.stop_loss_price ? formatNumber(pos.stop_loss_price) : '-'}
                   </td>

@@ -12,31 +12,29 @@ class FVGsPaneRenderer {
         target.useBitmapCoordinateSpace(scope => {
             const ctx = scope.context;
             const timeScale = this._chart.timeScale();
-            
+
             const horizontalPixelRatio = scope.horizontalPixelRatio || 1;
             const verticalPixelRatio = scope.verticalPixelRatio || 1;
-            
+
             ctx.save();
             ctx.scale(horizontalPixelRatio, verticalPixelRatio);
-            
+
             this._fvgs.forEach(fvg => {
                 // fvg: { time, top, bottom, type }
-                
+
                 // 1. Get x1 from time
                 const x1 = timeScale.timeToCoordinate(fvg.time);
-                
+
                 // If x1 is null, it might be off-screen.
                 // But we still need to draw if the extension is visible.
                 // However, timeToCoordinate returning null usually means we can't map it.
                 // Let's try to map it even if offscreen?
                 // Actually, if it's null, we can't get logical index easily.
-                
+
                 if (x1 === null) {
-                    // Try to find logical index from data?
-                    // This is hard without access to data here.
-                    // But wait, if the time is in the series, timeToCoordinate should return a value (even if negative).
-                    // Unless the time is NOT in the series?
-                    // fvg.time comes from the series data.
+                    // Start of FVG is off-screen or invalid. 
+                    // Ideally we should clamp it to screen edge if visible range > fvg.time
+                    // For now, safe return to prevent crash
                     return;
                 }
 
@@ -44,7 +42,7 @@ class FVGsPaneRenderer {
                 // Convert x1 to logical index
                 const logical1 = timeScale.coordinateToLogical(x1);
                 if (logical1 === null) return;
-                
+
                 const logical2 = logical1 + 20;
                 const x2 = timeScale.logicalToCoordinate(logical2);
                 if (x2 === null) return;
@@ -58,7 +56,7 @@ class FVGsPaneRenderer {
                 // Draw Rect
                 const w = x2 - x1;
                 const h = y2 - y1;
-                
+
                 ctx.beginPath();
                 if (fvg.type === 'bullish') {
                     // Greenish - More opaque for visibility
@@ -69,13 +67,13 @@ class FVGsPaneRenderer {
                     ctx.fillStyle = 'rgba(255, 82, 82, 0.4)';
                     ctx.strokeStyle = 'rgba(255, 82, 82, 0.8)';
                 }
-                
+
                 ctx.lineWidth = 1;
                 ctx.rect(x1, y1, w, h);
                 ctx.fill();
                 // ctx.stroke(); // Optional stroke
             });
-            
+
             ctx.restore();
         });
     }
@@ -86,7 +84,7 @@ export class FVGPrimitive {
         this._fvgs = [];
         this._series = null;
         this._chart = null;
-        this._requestUpdate = () => {};
+        this._requestUpdate = () => { };
     }
 
     attached({ chart, series, requestUpdate }) {
@@ -98,7 +96,7 @@ export class FVGPrimitive {
     detached() {
         this._chart = null;
         this._series = null;
-        this._requestUpdate = () => {};
+        this._requestUpdate = () => { };
     }
 
     setFVGs(fvgs) {

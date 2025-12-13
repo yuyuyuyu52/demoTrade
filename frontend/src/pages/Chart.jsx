@@ -6,61 +6,8 @@ import { FVGPrimitive } from '../plugins/FVGPrimitive';
 import { useAuth } from '../context/AuthContext';
 import { Pencil, Square, TrendingUp, ArrowUpCircle, ArrowDownCircle, Trash2, MousePointer2, Settings } from 'lucide-react';
 
-const TIMEZONE = 'America/New_York';
+import { TIMEZONE, timeframeToSeconds, toNySeconds } from '../utils/time';
 
-const timeframeToSeconds = (tf) => {
-    switch (tf) {
-        case '1m': return 60;
-        case '3m': return 3 * 60;
-        case '5m': return 5 * 60;
-        case '15m': return 15 * 60;
-        case '30m': return 30 * 60;
-        case '1h': return 60 * 60;
-        case '2h': return 2 * 60 * 60;
-        case '4h': return 4 * 60 * 60;
-        case '6h': return 6 * 60 * 60;
-        case '8h': return 8 * 60 * 60;
-        case '12h': return 12 * 60 * 60;
-        case '1d': return 24 * 60 * 60;
-        case '3d': return 3 * 24 * 60 * 60;
-        case '1w': return 7 * 24 * 60 * 60;
-        case '1M': return 30 * 24 * 60 * 60;
-        default: return 60 * 60; // fallback 1h
-    }
-};
-
-// Get timezone offset in seconds for a given timestamp (ms) and IANA zone
-const getTzOffsetSeconds = (ms, timeZone = TIMEZONE) => {
-    const dtf = new Intl.DateTimeFormat('en-US', {
-        timeZone,
-        hour12: false,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-    });
-
-    const parts = dtf.formatToParts(new Date(ms));
-    const filled = {};
-    for (const { type, value } of parts) {
-        filled[type] = value;
-    }
-    const asUTC = Date.UTC(
-        Number(filled.year),
-        Number(filled.month) - 1,
-        Number(filled.day),
-        Number(filled.hour),
-        Number(filled.minute),
-        Number(filled.second),
-    );
-
-    return (asUTC - ms) / 1000; // Positive means zone ahead of UTC
-};
-
-// Convert UTC ms timestamp to chart seconds shifted to TIMEZONE
-const toNySeconds = (ms) => Math.round(ms / 1000 + getTzOffsetSeconds(ms, TIMEZONE));
 
 export default function Chart({
     chartId = 'default',
