@@ -129,8 +129,11 @@ class MatchingEngine:
         d_fee = Decimal(str(fee))
         d_leverage = Decimal(str(leverage))
         
-        # Fetch Account
-        account = await session.get(Account, account_id)
+        # Fetch Account with pessimistic lock
+        stmt = select(Account).where(Account.id == account_id).with_for_update()
+        result = await session.execute(stmt)
+        account = result.scalar_one_or_none()
+        
         if not account:
             logger.error(f"Account {account_id} not found during trade execution")
             return
