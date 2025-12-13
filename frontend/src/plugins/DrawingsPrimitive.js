@@ -2,11 +2,12 @@
 import { LineStyle } from 'lightweight-charts';
 
 class DrawingsPaneRenderer {
-    constructor(drawings, series, chart, selectedId) {
+    constructor(drawings, series, chart, selectedId, interval) {
         this._drawings = drawings;
         this._series = series;
         this._chart = chart;
         this._selectedId = selectedId;
+        this._interval = interval || 60; // Default to 1m if missing
     }
 
     _getClosestTimeCoordinate(timeScale, targetTime) {
@@ -23,31 +24,34 @@ class DrawingsPaneRenderer {
         // 2. Extrapolate for past or future time (handles both directions)
         try {
             const data = this._series.data();
-            if (data && data.length >= 2) {
+            const tTime = Number(targetTime);
+
+            if (data && data.length > 0) {
                 const firstBar = data[0];
                 const lastBar = data[data.length - 1];
                 const firstTime = Number(firstBar.time);
                 const lastTime = Number(lastBar.time);
-                const tTime = Number(targetTime);
 
                 // Check if time is outside the data range
                 if (tTime > lastTime || tTime < firstTime) {
                     // Calculate a robust interval (ignore gaps like weekends)
                     let interval = Infinity;
-                    const checkCount = Math.min(data.length, 10);
 
-                    for (let i = 1; i < checkCount; i++) {
-                        const curr = Number(data[data.length - i].time);
-                        const prev = Number(data[data.length - i - 1].time);
-                        const diff = curr - prev;
-                        if (diff > 0 && diff < interval) {
-                            interval = diff;
+                    if (data.length >= 2) {
+                        const checkCount = Math.min(data.length, 10);
+                        for (let i = 1; i < checkCount; i++) {
+                            const curr = Number(data[data.length - i].time);
+                            const prev = Number(data[data.length - i - 1].time);
+                            const diff = curr - prev;
+                            if (diff > 0 && diff < interval) {
+                                interval = diff;
+                            }
                         }
                     }
 
+                    // Fallback to provided interval if data is sparse or interval invalid
                     if (interval === Infinity) {
-                        const prevBar = data[data.length - 2];
-                        interval = lastTime - Number(prevBar.time);
+                        interval = this._interval;
                     }
 
                     if (interval > 0) {
@@ -56,6 +60,7 @@ class DrawingsPaneRenderer {
                         let anchorLogical = null;
 
                         // For future time, use last bar; for past time, use first bar
+                        // Search backwards from end for future, or forwards from start for past
                         const searchData = tTime > lastTime ?
                             data.slice().reverse() :
                             data.slice(0, Math.min(20, data.length));
@@ -80,6 +85,12 @@ class DrawingsPaneRenderer {
                             const targetLogical = anchorLogical + logicalDiff;
                             const targetCoord = timeScale.logicalToCoordinate(targetLogical);
                             if (targetCoord !== null) return targetCoord;
+                        } else if (tTime > lastTime && data.length > 0) {
+                            // CRITICAL FIX: If no anchor with coordinate found (e.g. all offscreen?), 
+                            // but we have data, logic implies we should be able to project from known logical index.
+                            // Assuming the last bar IS the last logical index is risky if we don't know the mapping.
+                            // But giving up is better than snapping to the wrong place.
+                            return null;
                         }
                     }
                 }
@@ -93,13 +104,20 @@ class DrawingsPaneRenderer {
             const data = this._series.data();
             if (!data || data.length === 0) return null;
 
+            const tTime = Number(targetTime);
+            if (isNaN(tTime)) return null;
+
+            // Prevent snapping future times to the last bar
+            // If we are here, Extrapolation failed. If tTime is Future, DO NOT snap to Last Bar.
+            const lastBar = data[data.length - 1];
+            if (tTime > Number(lastBar.time)) {
+                return null;
+            }
+
             // Binary search to find the index of the bar <= tTime
             let left = 0;
             let right = data.length - 1;
             let leftIndex = -1;
-
-            const tTime = Number(targetTime);
-            if (isNaN(tTime)) return null;
 
             while (left <= right) {
                 const mid = Math.floor((left + right) / 2);
@@ -411,6 +429,7 @@ export class DrawingsPrimitive {
         this._series = null;
         this._chart = null;
         this._selectedId = null;
+        this._interval = 60;
         this._requestUpdate = () => { };
     }
 
@@ -436,10 +455,15 @@ export class DrawingsPrimitive {
         this._requestUpdate();
     }
 
+    setInterval(interval) {
+        this._interval = interval;
+        this._requestUpdate();
+    }
+
     paneViews() {
         if (!this._series || !this._chart) return [];
         return [{
-            renderer: () => new DrawingsPaneRenderer(this._drawings, this._series, this._chart, this._selectedId),
+            renderer: () => new DrawingsPaneRenderer(this._drawings, this._series, this._chart, this._selectedId, this._interval),
         }];
     }
 }

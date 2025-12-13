@@ -1719,6 +1719,10 @@ export default function Chart() {
         const drawingsPrimitive = new DrawingsPrimitive();
         newSeries.attachPrimitive(drawingsPrimitive);
         drawingsPrimitiveRef.current = drawingsPrimitive;
+
+        // Fix: Set interval immediately to ensure correct coordinate calculation
+        drawingsPrimitive.setInterval(timeframeToSeconds(timeframe));
+
         // Restore drawings if any (though state is reset on mount usually, but if we persisted it...)
         drawingsPrimitive.setDrawings(drawings);
 
