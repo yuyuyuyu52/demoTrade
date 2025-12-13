@@ -19,45 +19,35 @@ class DrawingsPaneRenderer {
 
         const data = this._series.data();
         if (!data || data.length === 0) {
-            console.log('[Drawing] No data available');
             return null;
         }
 
         const lastBar = data[data.length - 1];
         const lastTime = Number(lastBar.time);
 
-        console.log('[Drawing] Target time:', tTime, 'Last bar time:', lastTime, 'Interval:', this._interval, 'Is Future:', tTime > lastTime);
-
-        // 1. Future Time: Strictly project from the last known bar
+        // 1. Future Time: Calculate pixel position manually
+        // LWC's logicalToCoordinate returns 0 for out-of-range indices, so we must calculate ourselves
         if (tTime > lastTime) {
-            // We use the last bar as the anchor
-            let lastBarCoord = timeScale.timeToCoordinate(lastBar.time);
-            console.log('[Drawing] Future: lastBarCoord =', lastBarCoord);
+            const lastBarCoord = timeScale.timeToCoordinate(lastBar.time);
+            if (lastBarCoord === null) return null;
 
-            if (lastBarCoord === null) {
-                console.log('[Drawing] Future: lastBarCoord is null, cannot anchor');
-                return null;
+            // Calculate pixels per bar from the last two data points
+            let pixelsPerBar = 10; // Default fallback
+            if (data.length >= 2) {
+                const prevBar = data[data.length - 2];
+                const prevBarCoord = timeScale.timeToCoordinate(prevBar.time);
+                if (prevBarCoord !== null) {
+                    pixelsPerBar = lastBarCoord - prevBarCoord;
+                }
             }
 
-            const lastBarLogical = timeScale.coordinateToLogical(lastBarCoord);
-            console.log('[Drawing] Future: lastBarLogical =', lastBarLogical);
-
-            if (lastBarLogical === null) {
-                console.log('[Drawing] Future: lastBarLogical is null');
-                return null;
-            }
-
-            // Calculate how many "bars" away the target is
+            // Calculate how many "bars" into the future
             const timeDiff = tTime - lastTime;
             const interval = this._interval || 60;
+            const barsDiff = timeDiff / interval;
 
-            const logicalDiff = timeDiff / interval;
-            const targetLogical = lastBarLogical + logicalDiff;
-
-            console.log('[Drawing] Future: timeDiff =', timeDiff, 'logicalDiff =', logicalDiff, 'targetLogical =', targetLogical);
-
-            const targetCoord = timeScale.logicalToCoordinate(targetLogical);
-            console.log('[Drawing] Future: targetCoord =', targetCoord);
+            // Simply add the pixel offset to the last bar's coordinate
+            const targetCoord = lastBarCoord + (barsDiff * pixelsPerBar);
 
             return targetCoord;
         }
