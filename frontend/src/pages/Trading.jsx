@@ -18,7 +18,7 @@ export default function Trading() {
     stop_loss_price: ''
   });
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState({ text: '', type: '' });
+  const [notification, setNotification] = useState(null); // { text, type: 'success'|'error' }
   const [initialLoad, setInitialLoad] = useState(true);
   const [tpSlModal, setTpSlModal] = useState({
     isOpen: false,
@@ -26,6 +26,14 @@ export default function Trading() {
     take_profit_price: '',
     stop_loss_price: ''
   });
+
+  // Auto-dismiss notification
+  useEffect(() => {
+    if (notification) {
+      const timer = setTimeout(() => setNotification(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification]);
 
   useEffect(() => {
     if (user) {
@@ -82,7 +90,6 @@ export default function Trading() {
 
   const placeOrder = async (side) => {
     setLoading(true);
-    setMessage({ text: '', type: '' });
     try {
       const payload = {
         account_id: user.id,
@@ -96,17 +103,17 @@ export default function Trading() {
         stop_loss_price: orderForm.stop_loss_price ? parseFloat(orderForm.stop_loss_price) : null
       };
       await axios.post(`${API_URL}/orders/`, payload);
-      setMessage({ text: 'Order placed successfully!', type: 'success' });
+      setNotification({ text: 'Order placed successfully!', type: 'success' });
       fetchAccount();
     } catch (error) {
-      setMessage({ text: 'Failed to place order: ' + (error.response?.data?.detail || error.message), type: 'error' });
+      setNotification({ text: 'Failed to place order: ' + (error.response?.data?.detail || error.message), type: 'error' });
     } finally {
       setLoading(false);
     }
   };
 
   const closePosition = async (pos) => {
-    if (!window.confirm(`Are you sure you want to close ${pos.symbol} position?`)) return;
+    // Removed window.confirm for one-click close
     setLoading(true);
     try {
       const side = pos.quantity > 0 ? 'SELL' : 'BUY';
@@ -119,10 +126,10 @@ export default function Trading() {
         leverage: pos.leverage
       };
       await axios.post(`${API_URL}/orders/`, payload);
-      setMessage({ text: `Position ${pos.symbol} closed successfully!`, type: 'success' });
+      setNotification({ text: `Position ${pos.symbol} closed successfully!`, type: 'success' });
       fetchAccount();
     } catch (error) {
-      setMessage({ text: 'Failed to close position: ' + (error.response?.data?.detail || error.message), type: 'error' });
+      setNotification({ text: 'Failed to close position: ' + (error.response?.data?.detail || error.message), type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -155,11 +162,11 @@ export default function Trading() {
         stop_loss_price: tpSlModal.stop_loss_price ? parseFloat(tpSlModal.stop_loss_price) : null
       };
       await axios.patch(`${API_URL}/positions/${tpSlModal.position.id}`, payload);
-      setMessage({ text: 'TP/SL updated successfully!', type: 'success' });
+      setNotification({ text: 'TP/SL updated successfully!', type: 'success' });
       fetchAccount();
       closeTpSlModal();
     } catch (error) {
-      setMessage({ text: 'Failed to update TP/SL: ' + (error.response?.data?.detail || error.message), type: 'error' });
+      setNotification({ text: 'Failed to update TP/SL: ' + (error.response?.data?.detail || error.message), type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -172,7 +179,17 @@ export default function Trading() {
   if (!account) return <div>Loading account...</div>;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 relative">
+      {/* Notification Toast */}
+      {notification && (
+        <div className={`fixed top-4 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-lg shadow-xl z-[100] text-sm font-semibold animate-fade-in-down border ${notification.type === 'error'
+            ? 'bg-red-50 border-red-200 text-red-700'
+            : 'bg-green-50 border-green-200 text-green-700'
+          }`}>
+          {notification.text}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Place Order */}
         <div className="bg-white p-6 rounded-lg shadow-md">
@@ -266,23 +283,18 @@ export default function Trading() {
               <button
                 onClick={() => placeOrder('BUY')}
                 disabled={loading}
-                className="w-full bg-green-600 text-white py-3 rounded font-bold hover:bg-green-700 disabled:opacity-50"
+                className="w-full bg-green-600 text-white py-3 rounded font-bold hover:bg-green-700 disabled:opacity-50 transition-colors"
               >
                 {loading ? 'Processing...' : 'Long / Buy'}
               </button>
               <button
                 onClick={() => placeOrder('SELL')}
                 disabled={loading}
-                className="w-full bg-red-600 text-white py-3 rounded font-bold hover:bg-red-700 disabled:opacity-50"
+                className="w-full bg-red-600 text-white py-3 rounded font-bold hover:bg-red-700 disabled:opacity-50 transition-colors"
               >
                 {loading ? 'Processing...' : 'Short / Sell'}
               </button>
             </div>
-            {message.text && (
-              <p className={`text-sm mt-2 ${message.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
-                {message.text}
-              </p>
-            )}
           </div>
         </div>
 
@@ -344,7 +356,7 @@ export default function Trading() {
             </thead>
             <tbody>
               {account.positions.map((pos) => (
-                <tr key={pos.symbol} className="border-b last:border-0">
+                <tr key={pos.symbol} className="border-b last:border-0 hover:bg-gray-50 transition-colors">
                   <td className="py-2">{pos.symbol}</td>
                   <td className={`py-2 ${pos.quantity > 0 ? 'text-green-600' : 'text-red-600'}`}>
                     {formatQuantity(pos.quantity)}
@@ -363,13 +375,13 @@ export default function Trading() {
                   <td className="py-2">
                     <button
                       onClick={() => openTpSlModal(pos)}
-                      className="bg-blue-500 text-white px-3 py-1 rounded text-xs hover:bg-blue-600 mr-2"
+                      className="bg-blue-500 text-white px-3 py-1 rounded text-xs hover:bg-blue-600 mr-2 transition-colors"
                     >
                       TP/SL
                     </button>
                     <button
                       onClick={() => closePosition(pos)}
-                      className="bg-red-500 text-white px-3 py-1 rounded text-xs hover:bg-red-600"
+                      className="bg-red-500 text-white px-3 py-1 rounded text-xs hover:bg-red-600 transition-colors"
                     >
                       Close
                     </button>
@@ -383,8 +395,8 @@ export default function Trading() {
 
       {/* TP/SL Modal */}
       {tpSlModal.isOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg shadow-lg w-96">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 animate-fade-in">
+          <div className="bg-white p-6 rounded-lg shadow-lg w-96 transform transition-all scale-100">
             <h3 className="text-lg font-semibold mb-4">Edit TP/SL for {tpSlModal.position?.symbol}</h3>
             <div className="space-y-4">
               <div>
@@ -394,7 +406,7 @@ export default function Trading() {
                   step="0.01"
                   value={tpSlModal.take_profit_price}
                   onChange={(e) => setTpSlModal({ ...tpSlModal, take_profit_price: e.target.value })}
-                  className="mt-1 block w-full border p-2 rounded"
+                  className="mt-1 block w-full border p-2 rounded focus:ring-blue-500 focus:border-blue-500"
                   placeholder="Optional"
                 />
               </div>
@@ -405,21 +417,21 @@ export default function Trading() {
                   step="0.01"
                   value={tpSlModal.stop_loss_price}
                   onChange={(e) => setTpSlModal({ ...tpSlModal, stop_loss_price: e.target.value })}
-                  className="mt-1 block w-full border p-2 rounded"
+                  className="mt-1 block w-full border p-2 rounded focus:ring-blue-500 focus:border-blue-500"
                   placeholder="Optional"
                 />
               </div>
               <div className="flex justify-end space-x-2 mt-4">
                 <button
                   onClick={closeTpSlModal}
-                  className="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300"
+                  className="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={submitTpSl}
                   disabled={loading}
-                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
                 >
                   {loading ? 'Saving...' : 'Save'}
                 </button>

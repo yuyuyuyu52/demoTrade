@@ -748,8 +748,7 @@ export default function Chart({
                     e.stopPropagation();
                     e.preventDefault();
 
-                    if (!confirm('Are you sure?')) return;
-
+                    // One-click action (No browser confirm)
                     try {
                         if (draggableInfo.type === 'POS') {
                             // Close Position: Send Market Order
@@ -762,35 +761,55 @@ export default function Chart({
                                 side: side,
                                 order_type: 'MARKET',
                                 quantity: qty,
-                                leverage: 20 // Should ideally come from position info
+                                leverage: 20
                             };
 
-                            await fetch('/api/orders/', {
+                            const res = await fetch('/api/orders/', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify(payload)
                             });
+
+                            if (res.ok) {
+                                setNotification({ text: "Position Closed", type: 'success' });
+                            } else {
+                                const err = await res.json();
+                                setNotification({ text: `Failed to close: ${err.detail}`, type: 'error' });
+                            }
+
                         } else if (draggableInfo.type === 'ORDER') {
                             // Cancel Order
-                            await fetch(`/api/orders/${draggableInfo.orderId}`, {
+                            const res = await fetch(`/api/orders/${draggableInfo.orderId}`, {
                                 method: 'DELETE'
                             });
+                            if (res.ok) {
+                                setNotification({ text: "Order Cancelled", type: 'success' });
+                            } else {
+                                setNotification({ text: "Failed to cancel order", type: 'error' });
+                            }
+
                         } else if (draggableInfo.type === 'TP' || draggableInfo.type === 'SL') {
                             // Cancel TP/SL
                             const payload = {};
                             if (draggableInfo.type === 'TP') payload.take_profit_price = null;
                             if (draggableInfo.type === 'SL') payload.stop_loss_price = null;
 
-                            await fetch(`/api/positions/${draggableInfo.positionId}`, {
+                            const res = await fetch(`/api/positions/${draggableInfo.positionId}`, {
                                 method: 'PATCH',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify(payload)
                             });
+
+                            if (res.ok) {
+                                setNotification({ text: `${draggableInfo.type} Removed`, type: 'success' });
+                            } else {
+                                setNotification({ text: "Failed to update position", type: 'error' });
+                            }
                         }
                         updateOverlayData();
                     } catch (err) {
                         console.error("Failed to action", err);
-                        alert("Action failed");
+                        setNotification({ text: "Action failed", type: 'error' });
                     }
                 };
                 labelElement.appendChild(closeBtn);
