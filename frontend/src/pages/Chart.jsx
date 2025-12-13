@@ -117,6 +117,17 @@ export default function Chart({
         selectedDrawingIdRef.current = selectedDrawingId;
     }, [selectedDrawingId]);
 
+    const [showSettings, setShowSettings] = useState(false);
+    const [notification, setNotification] = useState(null); // { text, type: 'success'|'error' }
+
+    // Auto-dismiss notification
+    useEffect(() => {
+        if (notification) {
+            const timer = setTimeout(() => setNotification(null), 3000);
+            return () => clearTimeout(timer);
+        }
+    }, [notification]);
+
     // Handle signals from parent
     useEffect(() => {
         if (clearDrawingsTimestamp > prevClearDrawingsRef.current) {
@@ -145,7 +156,7 @@ export default function Chart({
     }, [showSettingsTimestamp]);
 
     // Chart Settings
-    const [showSettings, setShowSettings] = useState(false);
+
     const [showFVG, setShowFVG] = useState(false);
     const showFVGRef = useRef(false); // Ref to track latest showFVG for use inside closures
     const isChartReadyRef = useRef(false); // Track if initial data is loaded
@@ -1013,7 +1024,7 @@ export default function Chart({
     useEffect(() => {
         const placeOrder = async (side, type) => {
             if (!user) {
-                alert("Please login first");
+                setNotification({ text: "Please login first", type: 'error' });
                 return;
             }
 
@@ -1025,7 +1036,7 @@ export default function Chart({
             }
 
             if (!price) {
-                alert("Price data not available yet");
+                setNotification({ text: "Price data not available yet", type: 'error' });
                 return;
             }
 
@@ -1048,14 +1059,15 @@ export default function Chart({
 
                 if (res.ok) {
                     console.log(`${type} ${side} order placed successfully`);
+                    setNotification({ text: `${side} Order Placed`, type: 'success' });
                     updateOverlayData(); // Refresh lines
                 } else {
                     const err = await res.json();
-                    alert(`Order failed: ${err.detail}`);
+                    setNotification({ text: `Order failed: ${err.detail}`, type: 'error' });
                 }
             } catch (e) {
                 console.error("Order error", e);
-                alert("Failed to place order");
+                setNotification({ text: "Failed to place order", type: 'error' });
             }
         };
 
@@ -2220,50 +2232,54 @@ export default function Chart({
             <div className={`absolute inset-0 pointer-events-none z-20 border-2 transition-colors duration-200 ${isActive ? 'border-blue-500' : 'border-transparent group-hover:border-gray-300'
                 }`} />
 
-            {/* Settings Modal - Local state controlled by signal prop */}
+            {/* Notification Toast */}
+            {notification && (
+                <div className={`absolute top-16 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded shadow-lg z-50 text-sm font-medium animate-fade-in-down ${notification.type === 'error' ? 'bg-red-500 text-white' : 'bg-green-500 text-white'
+                    }`}>
+                    {notification.text}
+                </div>
+            )}
+
+            {/* Floating Settings Panel (No Backdrop) */}
             {showSettings && (
                 <div
-                    className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-                    onMouseDown={(e) => { e.stopPropagation(); }} // Stop propagation specifically for modal bg
-                    onClick={(e) => { e.stopPropagation(); setShowSettings(false); }}
+                    className="absolute top-2 right-2 z-40 bg-white p-4 rounded-lg shadow-2xl border border-gray-200 w-64 ring-1 ring-black ring-opacity-5"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
                 >
-                    <div className="bg-white p-6 rounded-lg shadow-xl w-64" onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
-                        <h3 className="text-lg font-bold mb-4">Chart Settings</h3>
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-base font-bold text-gray-800">Chart Settings</h3>
+                        <button
+                            onClick={() => setShowSettings(false)}
+                            className="text-gray-400 hover:text-gray-600 focus:outline-none"
+                        >
+                            <span className="text-xl">&times;</span>
+                        </button>
+                    </div>
 
-                        <div className="space-y-4">
-                            <div className="flex items-center justify-between">
-                                <label className="text-sm font-medium">Show FVG</label>
-                                <input
-                                    type="checkbox"
-                                    checked={showFVG}
-                                    onChange={(e) => setShowFVG(e.target.checked)}
-                                    className="h-4 w-4"
-                                />
-                            </div>
-
-                            <div className="border-t pt-4">
-                                <h4 className="text-sm font-semibold mb-2">Colors</h4>
-                                <div className="grid grid-cols-2 gap-2">
-                                    {/* Simplified Color Controls */}
-                                    <div>
-                                        <label className="block text-xs text-gray-500 mb-1">Up</label>
-                                        <input type="color" value={chartOptions.upColor} onChange={(e) => setChartOptions({ ...chartOptions, upColor: e.target.value })} className="w-full h-6 p-0 border-0" />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs text-gray-500 mb-1">Down</label>
-                                        <input type="color" value={chartOptions.downColor} onChange={(e) => setChartOptions({ ...chartOptions, downColor: e.target.value })} className="w-full h-6 p-0 border-0" />
-                                    </div>
-                                </div>
-                            </div>
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                            <label className="text-sm font-medium text-gray-700">Show FVG</label>
+                            <input
+                                type="checkbox"
+                                checked={showFVG}
+                                onChange={(e) => setShowFVG(e.target.checked)}
+                                className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
+                            />
                         </div>
 
-                        <div className="mt-6 flex justify-end">
-                            <button
-                                onClick={() => setShowSettings(false)}
-                                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
-                            >
-                                Close
-                            </button>
+                        <div className="border-t pt-4">
+                            <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Colors</h4>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs text-gray-500 mb-1">Up</label>
+                                    <input type="color" value={chartOptions.upColor} onChange={(e) => setChartOptions({ ...chartOptions, upColor: e.target.value })} className="w-full h-8 p-0 border rounded cursor-pointer" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-gray-500 mb-1">Down</label>
+                                    <input type="color" value={chartOptions.downColor} onChange={(e) => setChartOptions({ ...chartOptions, downColor: e.target.value })} className="w-full h-8 p-0 border rounded cursor-pointer" />
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
