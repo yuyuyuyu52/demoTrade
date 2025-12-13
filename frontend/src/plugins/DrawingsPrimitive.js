@@ -13,107 +13,49 @@ class DrawingsPaneRenderer {
     _getClosestTimeCoordinate(timeScale, targetTime) {
         if (targetTime === undefined || targetTime === null) return null;
 
-        // 1. Try direct conversion
+        // Ensure strictly numeric comparison
+        const tTime = Number(targetTime);
+        if (isNaN(tTime)) return null;
+
+        // 1. Try direct conversion first (LWC handles visible existing bars well)
         try {
-            const coord = timeScale.timeToCoordinate(targetTime);
+            const coord = timeScale.timeToCoordinate(tTime);
             if (coord !== null) return coord;
-        } catch (e) {
-            // Continue to fallback
+        } catch (e) { }
+
+        const data = this._series.data();
+        // If no data, we can't anchor anything.
+        if (!data || data.length === 0) return null;
+
+        const lastBar = data[data.length - 1];
+        const lastTime = Number(lastBar.time);
+
+        // 2. Future Time: Strictly project from the last known bar
+        if (tTime > lastTime) {
+            // We use the last bar as the anchor
+            const lastBarCoord = timeScale.timeToCoordinate(lastBar.time);
+            if (lastBarCoord === null) return null; // Should not happen if data is valid
+
+            const lastBarLogical = timeScale.coordinateToLogical(lastBarCoord);
+            if (lastBarLogical === null) return null;
+
+            // Calculate how many "bars" away the target is, based on the fixed timeframe interval
+            // This is the core "simple logic": Time Diff / SecondsPerBar
+            const timeDiff = tTime - lastTime;
+
+            // Use the trusted interval passed from Chart/Context, defaulting to 1m (60s) if missing
+            const interval = this._interval || 60;
+
+            const logicalDiff = timeDiff / interval;
+            const targetLogical = lastBarLogical + logicalDiff;
+
+            const targetCoord = timeScale.logicalToCoordinate(targetLogical);
+            return targetCoord;
         }
 
-        // 2. Extrapolate for past or future time (handles both directions)
+        // 3. Past Time (but timeToCoordinate failed, likely due to zoom/gaps/not exact bar match)
+        // We linear interpolate between the two closest bars.
         try {
-            const data = this._series.data();
-            const tTime = Number(targetTime);
-
-            if (data && data.length > 0) {
-                const firstBar = data[0];
-                const lastBar = data[data.length - 1];
-                const firstTime = Number(firstBar.time);
-                const lastTime = Number(lastBar.time);
-
-                // Check if time is outside the data range
-                if (tTime > lastTime || tTime < firstTime) {
-                    // Calculate a robust interval (ignore gaps like weekends)
-                    let interval = Infinity;
-
-                    if (data.length >= 2) {
-                        const checkCount = Math.min(data.length, 10);
-                        for (let i = 1; i < checkCount; i++) {
-                            const curr = Number(data[data.length - i].time);
-                            const prev = Number(data[data.length - i - 1].time);
-                            const diff = curr - prev;
-                            if (diff > 0 && diff < interval) {
-                                interval = diff;
-                            }
-                        }
-                    }
-
-                    // Fallback to provided interval if data is sparse or interval invalid
-                    if (interval === Infinity) {
-                        interval = this._interval;
-                    }
-
-                    if (interval > 0) {
-                        // Find the appropriate anchor bar based on direction
-                        let anchorBar = null;
-                        let anchorLogical = null;
-
-                        // For future time, use last bar; for past time, use first bar
-                        // Search backwards from end for future, or forwards from start for past
-                        const searchData = tTime > lastTime ?
-                            data.slice().reverse() :
-                            data.slice(0, Math.min(20, data.length));
-
-                        for (const bar of searchData) {
-                            const coord = timeScale.timeToCoordinate(bar.time);
-                            if (coord !== null) {
-                                const logical = timeScale.coordinateToLogical(coord);
-                                if (logical !== null) {
-                                    anchorBar = bar;
-                                    anchorLogical = logical;
-                                    break;
-                                }
-                            }
-                        }
-
-                        if (anchorBar && anchorLogical !== null) {
-                            const anchorTime = Number(anchorBar.time);
-                            const timeDiff = tTime - anchorTime;
-                            const logicalDiff = timeDiff / interval;
-
-                            const targetLogical = anchorLogical + logicalDiff;
-                            const targetCoord = timeScale.logicalToCoordinate(targetLogical);
-                            if (targetCoord !== null) return targetCoord;
-                        } else if (tTime > lastTime && data.length > 0) {
-                            // CRITICAL FIX: If no anchor with coordinate found (e.g. all offscreen?), 
-                            // but we have data, logic implies we should be able to project from known logical index.
-                            // Assuming the last bar IS the last logical index is risky if we don't know the mapping.
-                            // But giving up is better than snapping to the wrong place.
-                            return null;
-                        }
-                    }
-                }
-            }
-        } catch (e) {
-            // Ignore errors
-        }
-
-        // 3. Fallback: Interpolate between bars (for past times that don't match exact bar)
-        try {
-            const data = this._series.data();
-            if (!data || data.length === 0) return null;
-
-            const tTime = Number(targetTime);
-            if (isNaN(tTime)) return null;
-
-            // Prevent snapping future times to the last bar
-            // If we are here, Extrapolation failed. If tTime is Future, DO NOT snap to Last Bar.
-            const lastBar = data[data.length - 1];
-            if (tTime > Number(lastBar.time)) {
-                return null;
-            }
-
             // Binary search to find the index of the bar <= tTime
             let left = 0;
             let right = data.length - 1;
@@ -123,9 +65,7 @@ class DrawingsPaneRenderer {
                 const mid = Math.floor((left + right) / 2);
                 const midTime = Number(data[mid].time);
 
-                if (midTime === tTime) {
-                    return timeScale.timeToCoordinate(tTime);
-                }
+                if (midTime === tTime) return timeScale.timeToCoordinate(tTime);
 
                 if (midTime < tTime) {
                     leftIndex = mid;
@@ -135,13 +75,26 @@ class DrawingsPaneRenderer {
                 }
             }
 
-            // If time is before the first bar, return null instead of clamping
-            // This prevents control points from sticking to the left side when switching timeframes
+            // Before first bar?
             if (leftIndex === -1) {
+                // Extrapolate backwards from first bar
+                const firstBar = data[0];
+                const firstTime = Number(firstBar.time);
+                const firstBarCoord = timeScale.timeToCoordinate(firstBar.time);
+
+                if (firstBarCoord !== null) {
+                    const firstBarLogical = timeScale.coordinateToLogical(firstBarCoord);
+                    if (firstBarLogical !== null) {
+                        const interval = this._interval || 60;
+                        const timeDiff = tTime - firstTime; // negative
+                        const logicalDiff = timeDiff / interval;
+                        return timeScale.logicalToCoordinate(firstBarLogical + logicalDiff);
+                    }
+                }
                 return null;
             }
 
-            // If time is valid and we have a next bar, interpolate
+            // Between bars? Interpolate.
             if (leftIndex >= 0 && leftIndex < data.length - 1) {
                 const leftBar = data[leftIndex];
                 const rightBar = data[leftIndex + 1];
@@ -157,15 +110,15 @@ class DrawingsPaneRenderer {
                 }
             }
 
-            // Fallback to snapping if interpolation fails (e.g. rightX is null) or last bar
+            // Fallback: Snap to the found left bar
             if (leftIndex >= 0) {
                 return timeScale.timeToCoordinate(data[leftIndex].time);
             }
-
-            return null;
         } catch (e) {
-            return null;
+            console.error("Coordinate calculation error", e);
         }
+
+        return null;
     }
 
     draw(target) {
