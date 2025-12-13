@@ -62,7 +62,21 @@ const getTzOffsetSeconds = (ms, timeZone = TIMEZONE) => {
 // Convert UTC ms timestamp to chart seconds shifted to TIMEZONE
 const toNySeconds = (ms) => Math.round(ms / 1000 + getTzOffsetSeconds(ms, TIMEZONE));
 
-export default function Chart({ chartId = 'default', isActive = true, onActivate = () => { } }) {
+export default function Chart({
+    chartId = 'default',
+    isActive = true,
+    onActivate = () => { },
+    // Controlled Props
+    symbol = 'BTCUSDT',
+    timeframe = '1h',
+    quantity = 0.01,
+    activeTool = 'cursor',
+    // Signals
+    clearDrawingsTimestamp = 0,
+    showSettingsTimestamp = 0,
+    // Callbacks
+    onPriceChange = () => { }
+}) {
     const { user } = useAuth();
     const chartContainerRef = useRef();
     const seriesRef = useRef(null);
@@ -80,8 +94,7 @@ export default function Chart({ chartId = 'default', isActive = true, onActivate
     const isLoadingRef = useRef(false);
     const hasMoreRef = useRef(true);
 
-    // Drawing Tools State
-    const [activeTool, setActiveTool] = useState('cursor'); // cursor, line, rect, fib, long, short
+    // Drawing Tools State (activeTool is prop)
     const [drawings, setDrawings] = useState([]);
     const drawingsRef = useRef([]); // Ref to keep track of latest drawings for event handlers
     const [selectedDrawingId, setSelectedDrawingId] = useState(null);
@@ -89,6 +102,10 @@ export default function Chart({ chartId = 'default', isActive = true, onActivate
     const currentDrawingRef = useRef(null);
     const dragStateRef = useRef(null);
     const filledOrdersRef = useRef([]); // Store filled orders for click interaction
+
+    // Signal refs
+    const prevClearDrawingsRef = useRef(clearDrawingsTimestamp);
+    const prevShowSettingsRef = useRef(showSettingsTimestamp);
 
     // Sync refs with state
     useEffect(() => {
@@ -98,6 +115,33 @@ export default function Chart({ chartId = 'default', isActive = true, onActivate
     useEffect(() => {
         selectedDrawingIdRef.current = selectedDrawingId;
     }, [selectedDrawingId]);
+
+    // Handle signals from parent
+    useEffect(() => {
+        if (clearDrawingsTimestamp > prevClearDrawingsRef.current) {
+            // Delete all drawings
+            (async () => {
+                const drawingsToDelete = drawingsRef.current.filter(d => !String(d.id).startsWith('temp_'));
+                await Promise.all(drawingsToDelete.map(d => deleteDrawing(d.id)));
+                drawingsRef.current = [];
+                setDrawings([]);
+                setSelectedDrawingId(null);
+                selectedDrawingIdRef.current = null;
+                if (drawingsPrimitiveRef.current) {
+                    drawingsPrimitiveRef.current.setDrawings([]);
+                    drawingsPrimitiveRef.current.setSelectedId(null);
+                }
+            })();
+            prevClearDrawingsRef.current = clearDrawingsTimestamp;
+        }
+    }, [clearDrawingsTimestamp]);
+
+    useEffect(() => {
+        if (showSettingsTimestamp > prevShowSettingsRef.current) {
+            setShowSettings(true);
+            prevShowSettingsRef.current = showSettingsTimestamp;
+        }
+    }, [showSettingsTimestamp]);
 
     // Chart Settings
     const [showSettings, setShowSettings] = useState(false);
@@ -113,17 +157,6 @@ export default function Chart({ chartId = 'default', isActive = true, onActivate
         borderColor: '#000000',
     });
 
-    // Initialize state from localStorage if available (with fallback to legacy global keys)
-    const [symbol, setSymbol] = useState(() => {
-        return localStorage.getItem(`chart_${chartId}_symbol`) || localStorage.getItem('chart_symbol') || 'BTCUSDT';
-    });
-    const [timeframe, setTimeframe] = useState(() => {
-        return localStorage.getItem(`chart_${chartId}_timeframe`) || localStorage.getItem('chart_timeframe') || '1h';
-    });
-    const [quantity, setQuantity] = useState(() => {
-        const saved = localStorage.getItem(`chart_${chartId}_quantity`) || localStorage.getItem('chart_quantity');
-        return saved ? parseFloat(saved) : 0.01;
-    });
     const [error, setError] = useState(null);
     const [draggingLine, setDraggingLine] = useState(null);
 
@@ -131,12 +164,10 @@ export default function Chart({ chartId = 'default', isActive = true, onActivate
     const [currentPrice, setCurrentPrice] = useState(null);
     const [priceColor, setPriceColor] = useState('text-gray-800');
 
-    // Save settings to localStorage whenever they change
+    // Report price back to parent
     useEffect(() => {
-        localStorage.setItem(`chart_${chartId}_symbol`, symbol);
-        localStorage.setItem(`chart_${chartId}_timeframe`, timeframe);
-        localStorage.setItem(`chart_${chartId}_quantity`, quantity);
-    }, [symbol, timeframe, quantity, chartId]);
+        onPriceChange(currentPrice, priceColor);
+    }, [currentPrice, priceColor, onPriceChange]);
 
     // Apply Chart Options
     useEffect(() => {
@@ -2135,146 +2166,16 @@ export default function Chart({ chartId = 'default', isActive = true, onActivate
 
     return (
         <div
-            className={`flex flex-col h-full p-2 border-2 transition-colors ${isActive ? 'border-blue-500' : 'border-transparent hover:border-gray-300'}`}
+            className={`flex flex-col h-full bg-white relative transition-all ${isActive ? 'ring-2 ring-inset ring-blue-500 z-10' : 'hover:ring-2 hover:ring-inset hover:ring-gray-300'}`}
             onClick={onActivate}
         >
-            <div className="mb-2 flex justify-between items-center flex-shrink-0 flex-wrap gap-2">
-                {/* Left Side: Price & Timeframes */}
-                <div className="flex items-center gap-2 lg:gap-4">
-                    <div className={`text-xl font-bold font-mono ${priceColor} min-w-[100px]`}>
-                        {currentPrice ? currentPrice.toFixed(2) : '---'}
-                    </div>
-
-                    <div className="flex border rounded shadow-sm overflow-hidden scale-90 origin-left lg:scale-100">
-                        {['1m', '5m', '15m', '1h', '4h', '1d', '1w'].map((tf) => (
-                            <button
-                                key={tf}
-                                onClick={(e) => { e.stopPropagation(); setTimeframe(tf); }} // Prevent activating chart if already handled? No, activating is fine.
-                                className={`px-2 py-1 lg:px-3 lg:py-2 text-xs lg:text-sm font-medium transition-colors ${timeframe === tf
-                                    ? 'bg-blue-600 text-white'
-                                    : 'bg-white text-gray-700 hover:bg-gray-100'
-                                    }`}
-                            >
-                                {tf}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
-                {/* Right Side: Symbols, Qty, Tools */}
-                <div className="flex items-center gap-2 lg:gap-4 ml-auto">
-                    {/* Symbol Buttons */}
-                    <div className="flex border rounded shadow-sm overflow-hidden hidden sm:flex">
-                        {['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT'].map((sym) => (
-                            <button
-                                key={sym}
-                                onClick={(e) => { e.stopPropagation(); setSymbol(sym); }}
-                                className={`px-2 py-1 lg:px-3 lg:py-2 text-xs lg:text-sm font-medium transition-colors ${symbol === sym
-                                    ? 'bg-blue-600 text-white'
-                                    : 'bg-white text-gray-700 hover:bg-gray-100'
-                                    }`}
-                            >
-                                {sym.replace('USDT', '')}
-                            </button>
-                        ))}
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs lg:text-sm font-medium text-gray-700 hidden lg:inline">Qty:</span>
-                        <input
-                            type="number"
-                            value={quantity}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) => setQuantity(e.target.value)}
-                            className="p-1 lg:p-2 border rounded shadow-sm w-16 lg:w-24 text-sm"
-                            step="0.001"
-                        />
-                    </div>
-
-                    {/* Drawing Tools Toolbar */}
-                    <div className="flex border rounded shadow-sm overflow-hidden bg-white">
-                        <button
-                            onClick={(e) => { e.stopPropagation(); setActiveTool('cursor'); }}
-                            className={`p-1 lg:p-2 ${activeTool === 'cursor' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
-                            title="Cursor"
-                        >
-                            <MousePointer2 size={16} />
-                        </button>
-                        <button
-                            onClick={(e) => { e.stopPropagation(); setActiveTool('line'); }}
-                            className={`p-1 lg:p-2 ${activeTool === 'line' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
-                            title="Trend Line"
-                        >
-                            <Pencil size={16} />
-                        </button>
-                        <button
-                            onClick={(e) => { e.stopPropagation(); setActiveTool('rect'); }}
-                            className={`p-1 lg:p-2 ${activeTool === 'rect' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
-                            title="Rectangle"
-                        >
-                            <Square size={16} />
-                        </button>
-                        <button
-                            onClick={(e) => { e.stopPropagation(); setActiveTool('fib'); }}
-                            className={`p-1 lg:p-2 ${activeTool === 'fib' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
-                            title="Fibonacci Retracement"
-                        >
-                            <TrendingUp size={16} />
-                        </button>
-                        <button
-                            onClick={(e) => { e.stopPropagation(); setActiveTool('long'); }}
-                            className={`p-1 lg:p-2 ${activeTool === 'long' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
-                            title="Long Position"
-                        >
-                            <ArrowUpCircle size={16} />
-                        </button>
-                        <button
-                            onClick={(e) => { e.stopPropagation(); setActiveTool('short'); }}
-                            className={`p-1 lg:p-2 ${activeTool === 'short' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
-                            title="Short Position"
-                        >
-                            <ArrowDownCircle size={16} />
-                        </button>
-                        <button
-                            onClick={async (e) => {
-                                e.stopPropagation();
-                                // Delete all drawings from backend
-                                const drawingsToDelete = drawingsRef.current.filter(d => !String(d.id).startsWith('temp_'));
-                                await Promise.all(drawingsToDelete.map(d => deleteDrawing(d.id)));
-
-                                // Clear frontend state
-                                drawingsRef.current = [];
-                                setDrawings([]);
-                                setSelectedDrawingId(null);
-                                selectedDrawingIdRef.current = null;
-                                if (drawingsPrimitiveRef.current) {
-                                    drawingsPrimitiveRef.current.setDrawings([]);
-                                    drawingsPrimitiveRef.current.setSelectedId(null);
-                                }
-                            }}
-                            className="p-1 lg:p-2 text-red-600 hover:bg-red-50"
-                            title="Clear All Drawings"
-                        >
-                            <Trash2 size={16} />
-                        </button>
-                        <button
-                            onClick={(e) => { e.stopPropagation(); setShowSettings(true); }}
-                            className="p-1 lg:p-2 text-gray-600 hover:bg-gray-50"
-                            title="Chart Settings"
-                        >
-                            <Settings size={16} />
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            {/* Settings Modal */}
+            {/* Settings Modal - Local state controlled by signal prop */}
             {showSettings && (
                 <div
-                    className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-                    onClick={(e) => e.stopPropagation()}
+                    className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+                    onClick={(e) => { e.stopPropagation(); setShowSettings(false); }}
                 >
-                    <div className="bg-white p-6 rounded-lg shadow-xl w-80">
+                    <div className="bg-white p-6 rounded-lg shadow-xl w-64" onClick={e => e.stopPropagation()}>
                         <h3 className="text-lg font-bold mb-4">Chart Settings</h3>
 
                         <div className="space-y-4">
@@ -2290,64 +2191,16 @@ export default function Chart({ chartId = 'default', isActive = true, onActivate
 
                             <div className="border-t pt-4">
                                 <h4 className="text-sm font-semibold mb-2">Colors</h4>
-
                                 <div className="grid grid-cols-2 gap-2">
+                                    {/* Simplified Color Controls */}
                                     <div>
-                                        <label className="block text-xs text-gray-500 mb-1">Up Color</label>
-                                        <input
-                                            type="color"
-                                            value={chartOptions.upColor}
-                                            onChange={(e) => setChartOptions({ ...chartOptions, upColor: e.target.value })}
-                                            className="w-full h-8 p-0 border-0"
-                                        />
+                                        <label className="block text-xs text-gray-500 mb-1">Up</label>
+                                        <input type="color" value={chartOptions.upColor} onChange={(e) => setChartOptions({ ...chartOptions, upColor: e.target.value })} className="w-full h-6 p-0 border-0" />
                                     </div>
                                     <div>
-                                        <label className="block text-xs text-gray-500 mb-1">Down Color</label>
-                                        <input
-                                            type="color"
-                                            value={chartOptions.downColor}
-                                            onChange={(e) => setChartOptions({ ...chartOptions, downColor: e.target.value })}
-                                            className="w-full h-8 p-0 border-0"
-                                        />
+                                        <label className="block text-xs text-gray-500 mb-1">Down</label>
+                                        <input type="color" value={chartOptions.downColor} onChange={(e) => setChartOptions({ ...chartOptions, downColor: e.target.value })} className="w-full h-6 p-0 border-0" />
                                     </div>
-                                    <div>
-                                        <label className="block text-xs text-gray-500 mb-1">Wick Up</label>
-                                        <input
-                                            type="color"
-                                            value={chartOptions.wickUpColor}
-                                            onChange={(e) => setChartOptions({ ...chartOptions, wickUpColor: e.target.value })}
-                                            className="w-full h-8 p-0 border-0"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs text-gray-500 mb-1">Wick Down</label>
-                                        <input
-                                            type="color"
-                                            value={chartOptions.wickDownColor}
-                                            onChange={(e) => setChartOptions({ ...chartOptions, wickDownColor: e.target.value })}
-                                            className="w-full h-8 p-0 border-0"
-                                        />
-                                    </div>
-                                    <div className="col-span-2 flex items-center gap-2 mt-2">
-                                        <input
-                                            type="checkbox"
-                                            checked={chartOptions.borderVisible}
-                                            onChange={(e) => setChartOptions({ ...chartOptions, borderVisible: e.target.checked })}
-                                            className="h-4 w-4"
-                                        />
-                                        <label className="text-xs text-gray-500">Show Border</label>
-                                    </div>
-                                    {chartOptions.borderVisible && (
-                                        <div className="col-span-2">
-                                            <label className="block text-xs text-gray-500 mb-1">Border Color</label>
-                                            <input
-                                                type="color"
-                                                value={chartOptions.borderColor}
-                                                onChange={(e) => setChartOptions({ ...chartOptions, borderColor: e.target.value })}
-                                                className="w-full h-8 p-0 border-0"
-                                            />
-                                        </div>
-                                    )}
                                 </div>
                             </div>
                         </div>
@@ -2365,15 +2218,15 @@ export default function Chart({ chartId = 'default', isActive = true, onActivate
             )}
 
             {error && (
-                <div className="mb-4 p-4 bg-red-100 text-red-700 rounded flex-shrink-0">
-                    Error: {error}. Please check your connection or try a different symbol.
+                <div className="absolute top-2 left-2 right-2 p-2 bg-red-100 text-red-700 rounded z-20 text-xs">
+                    {error}
                 </div>
             )}
 
-            <div className="flex-grow relative border rounded-lg shadow-md overflow-hidden">
+            <div className="w-full h-full relative overflow-hidden">
                 <div
                     ref={chartContainerRef}
-                    style={{ height: '100%', width: '100%', backgroundColor: '#eee', cursor: draggingLine ? 'ns-resize' : 'default' }}
+                    style={{ height: '100%', width: '100%', backgroundColor: '#ffffff', cursor: draggingLine ? 'ns-resize' : 'default' }}
                 />
                 <div ref={labelsContainerRef} className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 10 }} />
             </div>
