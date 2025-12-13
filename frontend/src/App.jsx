@@ -8,7 +8,7 @@ import History from './pages/History';
 import EquityCurve from './pages/EquityCurve';
 import Calendar from './pages/Calendar';
 import Statistics from './pages/Statistics';
-import Chart from './pages/Chart';
+import MultiChart from './pages/MultiChart';
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
@@ -31,7 +31,7 @@ function AppRoutes() {
         <Route path="equity" element={<EquityCurve />} />
         <Route path="calendar" element={<Calendar />} />
         <Route path="statistics" element={<Statistics />} />
-        <Route path="chart" element={<Chart />} />
+        <Route path="chart" element={<MultiChart />} />
       </Route>
     </Routes>
   );

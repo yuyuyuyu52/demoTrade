@@ -62,7 +62,7 @@ const getTzOffsetSeconds = (ms, timeZone = TIMEZONE) => {
 // Convert UTC ms timestamp to chart seconds shifted to TIMEZONE
 const toNySeconds = (ms) => Math.round(ms / 1000 + getTzOffsetSeconds(ms, TIMEZONE));
 
-export default function Chart() {
+export default function Chart({ chartId = 'default', isActive = true, onActivate = () => { } }) {
     const { user } = useAuth();
     const chartContainerRef = useRef();
     const seriesRef = useRef(null);
@@ -113,11 +113,15 @@ export default function Chart() {
         borderColor: '#000000',
     });
 
-    // Initialize state from localStorage if available
-    const [symbol, setSymbol] = useState(() => localStorage.getItem('chart_symbol') || 'BTCUSDT');
-    const [timeframe, setTimeframe] = useState(() => localStorage.getItem('chart_timeframe') || '1h');
+    // Initialize state from localStorage if available (with fallback to legacy global keys)
+    const [symbol, setSymbol] = useState(() => {
+        return localStorage.getItem(`chart_${chartId}_symbol`) || localStorage.getItem('chart_symbol') || 'BTCUSDT';
+    });
+    const [timeframe, setTimeframe] = useState(() => {
+        return localStorage.getItem(`chart_${chartId}_timeframe`) || localStorage.getItem('chart_timeframe') || '1h';
+    });
     const [quantity, setQuantity] = useState(() => {
-        const saved = localStorage.getItem('chart_quantity');
+        const saved = localStorage.getItem(`chart_${chartId}_quantity`) || localStorage.getItem('chart_quantity');
         return saved ? parseFloat(saved) : 0.01;
     });
     const [error, setError] = useState(null);
@@ -129,10 +133,10 @@ export default function Chart() {
 
     // Save settings to localStorage whenever they change
     useEffect(() => {
-        localStorage.setItem('chart_symbol', symbol);
-        localStorage.setItem('chart_timeframe', timeframe);
-        localStorage.setItem('chart_quantity', quantity);
-    }, [symbol, timeframe, quantity]);
+        localStorage.setItem(`chart_${chartId}_symbol`, symbol);
+        localStorage.setItem(`chart_${chartId}_timeframe`, timeframe);
+        localStorage.setItem(`chart_${chartId}_quantity`, quantity);
+    }, [symbol, timeframe, quantity, chartId]);
 
     // Apply Chart Options
     useEffect(() => {
@@ -2130,20 +2134,23 @@ export default function Chart() {
     }, [symbol, timeframe, user, updateOverlayData]); // Re-run if user changes
 
     return (
-        <div className="flex flex-col h-[calc(100vh-64px)] p-4">
-            <div className="mb-4 flex justify-between items-center flex-shrink-0">
+        <div
+            className={`flex flex-col h-full p-2 border-2 transition-colors ${isActive ? 'border-blue-500' : 'border-transparent hover:border-gray-300'}`}
+            onClick={onActivate}
+        >
+            <div className="mb-2 flex justify-between items-center flex-shrink-0 flex-wrap gap-2">
                 {/* Left Side: Price & Timeframes */}
-                <div className="flex items-center gap-6">
-                    <div className={`text-2xl font-bold font-mono ${priceColor} min-w-[120px]`}>
+                <div className="flex items-center gap-2 lg:gap-4">
+                    <div className={`text-xl font-bold font-mono ${priceColor} min-w-[100px]`}>
                         {currentPrice ? currentPrice.toFixed(2) : '---'}
                     </div>
 
-                    <div className="flex border rounded shadow-sm overflow-hidden">
+                    <div className="flex border rounded shadow-sm overflow-hidden scale-90 origin-left lg:scale-100">
                         {['1m', '5m', '15m', '1h', '4h', '1d', '1w'].map((tf) => (
                             <button
                                 key={tf}
-                                onClick={() => setTimeframe(tf)}
-                                className={`px-3 py-2 text-sm font-medium transition-colors ${timeframe === tf
+                                onClick={(e) => { e.stopPropagation(); setTimeframe(tf); }} // Prevent activating chart if already handled? No, activating is fine.
+                                className={`px-2 py-1 lg:px-3 lg:py-2 text-xs lg:text-sm font-medium transition-colors ${timeframe === tf
                                     ? 'bg-blue-600 text-white'
                                     : 'bg-white text-gray-700 hover:bg-gray-100'
                                     }`}
@@ -2155,30 +2162,31 @@ export default function Chart() {
                 </div>
 
                 {/* Right Side: Symbols, Qty, Tools */}
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2 lg:gap-4 ml-auto">
                     {/* Symbol Buttons */}
-                    <div className="flex border rounded shadow-sm overflow-hidden">
+                    <div className="flex border rounded shadow-sm overflow-hidden hidden sm:flex">
                         {['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT'].map((sym) => (
                             <button
                                 key={sym}
-                                onClick={() => setSymbol(sym)}
-                                className={`px-3 py-2 text-sm font-medium transition-colors ${symbol === sym
+                                onClick={(e) => { e.stopPropagation(); setSymbol(sym); }}
+                                className={`px-2 py-1 lg:px-3 lg:py-2 text-xs lg:text-sm font-medium transition-colors ${symbol === sym
                                     ? 'bg-blue-600 text-white'
                                     : 'bg-white text-gray-700 hover:bg-gray-100'
                                     }`}
                             >
-                                {sym}
+                                {sym.replace('USDT', '')}
                             </button>
                         ))}
                     </div>
 
                     <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-gray-700">Qty:</span>
+                        <span className="text-xs lg:text-sm font-medium text-gray-700 hidden lg:inline">Qty:</span>
                         <input
                             type="number"
                             value={quantity}
+                            onClick={(e) => e.stopPropagation()}
                             onChange={(e) => setQuantity(e.target.value)}
-                            className="p-2 border rounded shadow-sm w-24"
+                            className="p-1 lg:p-2 border rounded shadow-sm w-16 lg:w-24 text-sm"
                             step="0.001"
                         />
                     </div>
@@ -2186,49 +2194,50 @@ export default function Chart() {
                     {/* Drawing Tools Toolbar */}
                     <div className="flex border rounded shadow-sm overflow-hidden bg-white">
                         <button
-                            onClick={() => setActiveTool('cursor')}
-                            className={`p-2 ${activeTool === 'cursor' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                            onClick={(e) => { e.stopPropagation(); setActiveTool('cursor'); }}
+                            className={`p-1 lg:p-2 ${activeTool === 'cursor' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
                             title="Cursor"
                         >
-                            <MousePointer2 size={18} />
+                            <MousePointer2 size={16} />
                         </button>
                         <button
-                            onClick={() => setActiveTool('line')}
-                            className={`p-2 ${activeTool === 'line' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                            onClick={(e) => { e.stopPropagation(); setActiveTool('line'); }}
+                            className={`p-1 lg:p-2 ${activeTool === 'line' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
                             title="Trend Line"
                         >
-                            <Pencil size={18} />
+                            <Pencil size={16} />
                         </button>
                         <button
-                            onClick={() => setActiveTool('rect')}
-                            className={`p-2 ${activeTool === 'rect' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                            onClick={(e) => { e.stopPropagation(); setActiveTool('rect'); }}
+                            className={`p-1 lg:p-2 ${activeTool === 'rect' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
                             title="Rectangle"
                         >
-                            <Square size={18} />
+                            <Square size={16} />
                         </button>
                         <button
-                            onClick={() => setActiveTool('fib')}
-                            className={`p-2 ${activeTool === 'fib' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                            onClick={(e) => { e.stopPropagation(); setActiveTool('fib'); }}
+                            className={`p-1 lg:p-2 ${activeTool === 'fib' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
                             title="Fibonacci Retracement"
                         >
-                            <TrendingUp size={18} />
+                            <TrendingUp size={16} />
                         </button>
                         <button
-                            onClick={() => setActiveTool('long')}
-                            className={`p-2 ${activeTool === 'long' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                            onClick={(e) => { e.stopPropagation(); setActiveTool('long'); }}
+                            className={`p-1 lg:p-2 ${activeTool === 'long' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
                             title="Long Position"
                         >
-                            <ArrowUpCircle size={18} />
+                            <ArrowUpCircle size={16} />
                         </button>
                         <button
-                            onClick={() => setActiveTool('short')}
-                            className={`p-2 ${activeTool === 'short' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+                            onClick={(e) => { e.stopPropagation(); setActiveTool('short'); }}
+                            className={`p-1 lg:p-2 ${activeTool === 'short' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
                             title="Short Position"
                         >
-                            <ArrowDownCircle size={18} />
+                            <ArrowDownCircle size={16} />
                         </button>
                         <button
-                            onClick={async () => {
+                            onClick={async (e) => {
+                                e.stopPropagation();
                                 // Delete all drawings from backend
                                 const drawingsToDelete = drawingsRef.current.filter(d => !String(d.id).startsWith('temp_'));
                                 await Promise.all(drawingsToDelete.map(d => deleteDrawing(d.id)));
@@ -2243,17 +2252,17 @@ export default function Chart() {
                                     drawingsPrimitiveRef.current.setSelectedId(null);
                                 }
                             }}
-                            className="p-2 text-red-600 hover:bg-red-50"
+                            className="p-1 lg:p-2 text-red-600 hover:bg-red-50"
                             title="Clear All Drawings"
                         >
-                            <Trash2 size={18} />
+                            <Trash2 size={16} />
                         </button>
                         <button
-                            onClick={() => setShowSettings(true)}
-                            className="p-2 text-gray-600 hover:bg-gray-50"
+                            onClick={(e) => { e.stopPropagation(); setShowSettings(true); }}
+                            className="p-1 lg:p-2 text-gray-600 hover:bg-gray-50"
                             title="Chart Settings"
                         >
-                            <Settings size={18} />
+                            <Settings size={16} />
                         </button>
                     </div>
                 </div>
@@ -2261,7 +2270,10 @@ export default function Chart() {
 
             {/* Settings Modal */}
             {showSettings && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div
+                    className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+                    onClick={(e) => e.stopPropagation()}
+                >
                     <div className="bg-white p-6 rounded-lg shadow-xl w-80">
                         <h3 className="text-lg font-bold mb-4">Chart Settings</h3>
 
