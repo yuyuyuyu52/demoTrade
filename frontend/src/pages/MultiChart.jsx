@@ -222,6 +222,7 @@ export default function MultiChart() {
                                         setActivePriceColor(color);
                                     }
                                 }}
+                                onToolChange={(tool) => updateChartData(id, { activeTool: tool })}
                             />
                         </div>
                     );

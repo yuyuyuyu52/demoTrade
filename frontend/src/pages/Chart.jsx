@@ -75,7 +75,8 @@ export default function Chart({
     clearDrawingsTimestamp = 0,
     showSettingsTimestamp = 0,
     // Callbacks
-    onPriceChange = () => { }
+    onPriceChange = () => { },
+    onToolChange = () => { }
 }) {
     const { user } = useAuth();
     const chartContainerRef = useRef();
@@ -1205,7 +1206,7 @@ export default function Chart({
                             // Save
                             saveDrawing(newDrawing);
 
-                            setActiveTool('cursor');
+                            onToolChange('cursor');
                             return;
                         }
 
@@ -1275,7 +1276,7 @@ export default function Chart({
                         saveDrawing(newDrawing);
 
                         currentDrawingRef.current = null;
-                        setActiveTool('cursor'); // Reset tool
+                        onToolChange('cursor'); // Reset tool
 
                         // Re-enable chart interactions
                         chartRef.current.applyOptions({ handleScroll: true, handleScale: true });
