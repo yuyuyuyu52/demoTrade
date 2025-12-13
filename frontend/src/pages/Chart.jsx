@@ -1007,7 +1007,7 @@ export default function Chart({
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [selectedDrawingId, drawings]);
+    }, [selectedDrawingId, drawings, isActive]);
 
     // Keyboard Shortcuts for Trading
     useEffect(() => {
@@ -1086,7 +1086,7 @@ export default function Chart({
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [user, symbol, quantity, updateOverlayData]);
+    }, [user, symbol, quantity, updateOverlayData, isActive]);
 
     // Handle Dragging Logic (Separate Effect for Event Listeners using Refs)
     useEffect(() => {
