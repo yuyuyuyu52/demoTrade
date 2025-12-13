@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { LayoutDashboard, History, LineChart, Calendar, BarChart2, TrendingUp, Menu, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -6,7 +6,7 @@ import { LayoutDashboard, History, LineChart, Calendar, BarChart2, TrendingUp, M
 export default function Layout() {
   const { user } = useAuth();
   const location = useLocation();
-  const [isSidebarOpen, setSidebarOpen] = React.useState(true);
+  const [isSidebarOpen, setSidebarOpen] = useState(false); // Default to collapsed
 
   const navigation = [
     { name: 'Trading', href: '/', icon: LayoutDashboard },
@@ -49,8 +49,8 @@ export default function Layout() {
                 to={item.href}
                 title={!isSidebarOpen ? item.name : ''}
                 className={`flex items-center mx-2 px-2 py-2 rounded-md transition-colors ${isActive
-                    ? 'bg-indigo-50 text-indigo-700'
-                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                   } ${isSidebarOpen ? '' : 'justify-center'}`}
               >
                 <Icon size={22} className={`flex-shrink-0 ${isSidebarOpen ? 'mr-3' : ''}`} />

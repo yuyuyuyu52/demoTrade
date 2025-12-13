@@ -4,7 +4,7 @@ import { LayoutGrid, Square, Columns, Rows, Trash2, Settings, MousePointer2, Pen
 
 export default function MultiChart() {
     // Layout modes: '1x1', '2x1' (2 vertical cols), '1x2' (2 horizontal rows), '2x2'
-    const [layout, setLayout] = useState('1x1');
+    const [layout, setLayout] = useState(() => localStorage.getItem('multiChartLayout') || '1x1');
     const [activeChartId, setActiveChartId] = useState(0);
     const [charts, setCharts] = useState([0]);
 
@@ -28,6 +28,7 @@ export default function MultiChart() {
 
     // Update charts array when layout changes
     useEffect(() => {
+        localStorage.setItem('multiChartLayout', layout);
         let count = 1;
         switch (layout) {
             case '1x1': count = 1; break;
