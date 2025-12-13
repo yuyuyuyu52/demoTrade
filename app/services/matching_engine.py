@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Order, OrderType, OrderSide, OrderStatus, Trade, Account, Position, PositionHistory
 from app.services.binance_ws import get_current_price
 from app.database import AsyncSessionLocal
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +43,6 @@ class MatchingEngine:
             if current_price is None or current_price <= 0:
                 continue
 
-            # Debug logging
-            if order.symbol == "BTCUSDT" and order.limit_price and order.limit_price < 10000 and order.side == OrderSide.BUY:
-                 logger.debug(f"Checking Order {order.id}: {order.symbol} {order.side} {order.limit_price} vs Market {current_price}")
-
             should_execute = False
             if order.order_type == OrderType.MARKET:
                 should_execute = True
@@ -68,9 +65,7 @@ class MatchingEngine:
         fill_qty = remaining_qty # Simple simulation: fill all available
         
         # Calculate Fee
-        # Market: 0.045% (0.00045)
-        # Limit: 0.018% (0.00018)
-        fee_rate = Decimal("0.00045") if order.order_type == OrderType.MARKET else Decimal("0.00018")
+        fee_rate = Decimal(str(settings.MARKET_FEE_RATE)) if order.order_type == OrderType.MARKET else Decimal(str(settings.LIMIT_FEE_RATE))
         trade_value = d_price * fill_qty
         fee = trade_value * fee_rate
         

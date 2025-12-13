@@ -62,21 +62,9 @@ class BinanceWS:
                 logger.error(f"Invalid price format for {symbol}: {data['data'].get('p')}")
                 return
 
+            # Optional: Basic sanity check for positive price
             if price <= 0:
                 logger.error(f"CRITICAL: Price is zero or negative: {price}. Symbol: {symbol}. Raw: {data}")
-                return
-
-            # Anomaly detection: Check for sudden large price changes (>50%)
-            old_price = price_cache.get(symbol)
-            if old_price:
-                change = abs(price - old_price) / old_price
-                if change > 0.5:
-                    logger.warning(f"Suspicious price jump for {symbol}: {old_price} -> {price}. Ignoring update. Raw: {data}")
-                    return
-
-            # Safety check for BTCUSDT
-            if symbol == "BTCUSDT" and price < 10000:
-                logger.error(f"CRITICAL: Received abnormal BTCUSDT price: {price}. Raw data: {data}")
                 return
 
             price_cache[symbol] = price
