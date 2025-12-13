@@ -2298,6 +2298,27 @@ export default function Chart({
                                     <label className="block text-xs text-gray-500 mb-1">Down</label>
                                     <input type="color" value={chartOptions.downColor} onChange={(e) => setChartOptions({ ...chartOptions, downColor: e.target.value })} className="w-full h-8 p-0 border rounded cursor-pointer" />
                                 </div>
+                                <div>
+                                    <label className="block text-xs text-gray-500 mb-1">Wick Up</label>
+                                    <input type="color" value={chartOptions.wickUpColor} onChange={(e) => setChartOptions({ ...chartOptions, wickUpColor: e.target.value })} className="w-full h-8 p-0 border rounded cursor-pointer" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-gray-500 mb-1">Wick Down</label>
+                                    <input type="color" value={chartOptions.wickDownColor} onChange={(e) => setChartOptions({ ...chartOptions, wickDownColor: e.target.value })} className="w-full h-8 p-0 border rounded cursor-pointer" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-gray-500 mb-1">Border</label>
+                                    <input type="color" value={chartOptions.borderColor} onChange={(e) => setChartOptions({ ...chartOptions, borderColor: e.target.value })} className="w-full h-8 p-0 border rounded cursor-pointer" />
+                                </div>
+                                <div className="col-span-2 flex items-center">
+                                    <input
+                                        type="checkbox"
+                                        checked={chartOptions.borderVisible}
+                                        onChange={(e) => setChartOptions({ ...chartOptions, borderVisible: e.target.checked })}
+                                        className="h-4 w-4 text-blue-600 rounded mr-2"
+                                    />
+                                    <label className="text-xs text-gray-500">Border Visible</label>
+                                </div>
                             </div>
                         </div>
                     </div>
