@@ -904,27 +904,56 @@ export default function Chart({
                     });
 
                     // Add Markers for Filled Orders (History)
-                    const markers = ordersData
+                    const rawMarkers = ordersData
                         .filter(o => o.symbol === symbol && o.status === 'FILLED')
                         .map(o => {
-                            // Use updated_at for FILLED orders to show execution time, shifted to NY time
+                            // Use updated_at for FILLED orders
                             const originalTime = toNySeconds(new Date(o.updated_at).getTime());
                             const interval = timeframeToSeconds(timeframe);
-                            // Normalize time to the start of the candle for the current timeframe
+                            // Normalize time to the start of the candle
                             const normalizedTime = Math.floor(originalTime / interval) * interval;
-
                             return {
-                                time: normalizedTime,
-                                position: o.side === 'BUY' ? 'belowBar' : 'aboveBar',
-                                color: o.side === 'BUY' ? '#2196F3' : '#E91E63',
-                                shape: o.side === 'BUY' ? 'arrowUp' : 'arrowDown',
-                                text: '',
-                                originalPrice: parseFloat(o.price),
-                                side: o.side,
-                                quantity: o.quantity,
-                                id: o.id
+                                ...o,
+                                normalizedTime,
+                                originalPrice: parseFloat(o.price)
                             };
                         });
+
+                    // Aggregate markers by Time and Side
+                    const aggregatedMarkersMap = new Map();
+
+                    rawMarkers.forEach(o => {
+                        const key = `${o.normalizedTime}_${o.side}`;
+                        if (!aggregatedMarkersMap.has(key)) {
+                            aggregatedMarkersMap.set(key, {
+                                time: o.normalizedTime,
+                                side: o.side,
+                                quantity: 0,
+                                prices: [],
+                                count: 0,
+                                id: o.id // Use first ID as representative
+                            });
+                        }
+                        const entry = aggregatedMarkersMap.get(key);
+                        entry.quantity += parseFloat(o.quantity);
+                        entry.prices.push(o.originalPrice);
+                        entry.count += 1;
+                    });
+
+                    const markers = Array.from(aggregatedMarkersMap.values()).map(m => {
+                        const avgPrice = m.prices.reduce((a, b) => a + b, 0) / m.count;
+                        return {
+                            time: m.time,
+                            position: m.side === 'BUY' ? 'belowBar' : 'aboveBar',
+                            color: m.side === 'BUY' ? '#2196F3' : '#E91E63',
+                            shape: m.side === 'BUY' ? 'arrowUp' : 'arrowDown',
+                            text: '', // Text handled by price line on click
+                            originalPrice: avgPrice,
+                            side: m.side,
+                            quantity: m.quantity, // Total quantity
+                            id: m.id
+                        };
+                    });
 
                     // Store markers in ref for click detection
                     filledOrdersRef.current = markers;
@@ -950,6 +979,7 @@ export default function Chart({
     // Handle Delete Key for Drawings
     useEffect(() => {
         const handleKeyDown = (e) => {
+            if (!isActive) return; // Only handle for active chart
             if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDrawingId) {
                 const drawing = drawings.find(d => d.id === selectedDrawingId);
                 if (drawing) {
@@ -1024,6 +1054,8 @@ export default function Chart({
         };
 
         const handleKeyDown = (e) => {
+            if (!isActive) return; // Only handle for active chart
+
             // Shift + B -> Market Buy
             if (e.shiftKey && e.code === 'KeyB' && !e.altKey && !e.ctrlKey && !e.metaKey) {
                 e.preventDefault();
