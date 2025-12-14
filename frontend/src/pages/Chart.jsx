@@ -6,7 +6,7 @@ import { FVGPrimitive } from '../plugins/FVGPrimitive';
 import { useAuth } from '../context/AuthContext';
 import { Pencil, Square, TrendingUp, ArrowUpCircle, ArrowDownCircle, Trash2, MousePointer2, Settings } from 'lucide-react';
 
-import { TIMEZONE, timeframeToSeconds, toNySeconds, toChartSeconds } from '../utils/time';
+import { TIMEZONE, timeframeToSeconds, toNySeconds, toChartSeconds, toUTCSeconds } from '../utils/time';
 
 
 export default function Chart({
@@ -265,9 +265,9 @@ export default function Chart({
                 const loadedDrawings = data.map(d => ({
                     id: d.id,
                     type: d.type,
-                    p1: d.data.p1,
-                    p2: d.data.p2,
-                    p3: d.data.p3 // Load p3 if exists
+                    p1: { ...d.data.p1, time: toChartSeconds(d.data.p1.time * 1000, timezone) },
+                    p2: { ...d.data.p2, time: toChartSeconds(d.data.p2.time * 1000, timezone) },
+                    p3: d.data.p3 ? { ...d.data.p3, time: toChartSeconds(d.data.p3.time * 1000, timezone) } : undefined
                 }));
                 setDrawings(loadedDrawings);
                 if (drawingsPrimitiveRef.current) {
@@ -277,7 +277,7 @@ export default function Chart({
         } catch (err) {
             console.error("Failed to fetch drawings", err);
         }
-    }, [user, symbol]);
+    }, [user, symbol, timezone]);
 
     useEffect(() => {
         fetchDrawings();
@@ -287,11 +287,16 @@ export default function Chart({
     const saveDrawing = async (drawing) => {
         if (!user) return;
         try {
+            const convertPoint = (p) => ({ ...p, time: toUTCSeconds(p.time, timezone) });
             const payload = {
                 account_id: user.id,
                 symbol: symbol,
                 type: drawing.type,
-                data: { p1: drawing.p1, p2: drawing.p2, p3: drawing.p3 }
+                data: {
+                    p1: convertPoint(drawing.p1),
+                    p2: convertPoint(drawing.p2),
+                    p3: drawing.p3 ? convertPoint(drawing.p3) : undefined
+                }
             };
             const res = await fetch('/api/drawings/', {
                 method: 'POST',
@@ -339,8 +344,13 @@ export default function Chart({
         if (String(drawing.id).startsWith('temp_')) return;
 
         try {
+            const convertPoint = (p) => ({ ...p, time: toUTCSeconds(p.time, timezone) });
             const payload = {
-                data: { p1: drawing.p1, p2: drawing.p2, p3: drawing.p3 }
+                data: {
+                    p1: convertPoint(drawing.p1),
+                    p2: convertPoint(drawing.p2),
+                    p3: drawing.p3 ? convertPoint(drawing.p3) : undefined
+                }
             };
             await fetch(`/api/drawings/${drawing.id}`, {
                 method: 'PUT',
