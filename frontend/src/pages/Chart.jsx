@@ -6,7 +6,7 @@ import { FVGPrimitive } from '../plugins/FVGPrimitive';
 import { useAuth } from '../context/AuthContext';
 import { Pencil, Square, TrendingUp, ArrowUpCircle, ArrowDownCircle, Trash2, MousePointer2, Settings } from 'lucide-react';
 
-import { TIMEZONE, timeframeToSeconds, toNySeconds } from '../utils/time';
+import { TIMEZONE, timeframeToSeconds, toNySeconds, toChartSeconds } from '../utils/time';
 
 
 export default function Chart({
@@ -897,7 +897,7 @@ export default function Chart({
                     .filter(o => o.symbol === symbol && o.status === 'FILLED')
                     .map(o => {
                         // Use updated_at for FILLED orders
-                        const originalTime = toNySeconds(new Date(o.updated_at).getTime());
+                        const originalTime = toChartSeconds(new Date(o.updated_at).getTime(), timezone);
                         const interval = timeframeToSeconds(timeframe);
                         // Normalize time to the start of the candle
                         const normalizedTime = Math.floor(originalTime / interval) * interval;
@@ -2033,7 +2033,7 @@ export default function Chart({
                 }
 
                 const cdata = data.map(d => ({
-                    time: toNySeconds(d[0]),
+                    time: toChartSeconds(d[0], timezone),
                     originalTimeMs: d[0],
                     open: parseFloat(d[1]),
                     high: parseFloat(d[2]),
@@ -2129,7 +2129,7 @@ export default function Chart({
 
                     const kline = message.k;
                     const candle = {
-                        time: toNySeconds(kline.t),
+                        time: toChartSeconds(kline.t, timezone),
                         originalTimeMs: kline.t,
                         open: parseFloat(kline.o),
                         high: parseFloat(kline.h),
@@ -2195,7 +2195,7 @@ export default function Chart({
                 chartRef.current.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
             }
         };
-    }, [symbol, timeframe, user, updateOverlayData, updateFVGs]); // Re-run if user changes
+    }, [symbol, timeframe, timezone, user, updateOverlayData, updateFVGs]); // Re-run if timezone changes
 
     // -------------------------------------------------------------------------
     // 2.5 Apply Timezone Change (Must be after Chart Init)
