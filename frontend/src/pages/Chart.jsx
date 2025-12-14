@@ -144,7 +144,6 @@ export default function Chart({
                 wickDownColor: chartOptions.wickDownColor,
                 borderVisible: chartOptions.borderVisible,
                 borderColor: chartOptions.borderColor,
-                lastValueVisible: false, // Hide default label, replaced by CountdownPrimitive
             });
 
             // Update CountdownPrimitive colors
@@ -1800,6 +1799,10 @@ export default function Chart({
             timeScale: {
                 timeVisible: true,
                 secondsVisible: false,
+            },
+            rightPriceScale: {
+                autoScale: true,
+                minimumWidth: 75, // Fix width to prevent jitter
             },
             localization: {
                 locale: 'en-US',

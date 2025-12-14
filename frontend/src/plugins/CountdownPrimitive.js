@@ -50,7 +50,7 @@ export class CountdownPrimitive {
                     if (data.length === 0) return null;
                     const lastBar = data[data.length - 1];
                     const y = this._series.priceToCoordinate(lastBar.close);
-                    return y; // Position exactly at price level
+                    return y + 22; // Render below the price label
                 } catch (e) {
                     return null;
                 }
@@ -79,11 +79,7 @@ export class CountdownPrimitive {
                     if (h > 0) timerText += `${h}:`;
                     timerText += `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 
-                    // Format Price
-                    const priceFormatted = this._series.priceFormatter().format(lastBar.close);
-
-                    // Combine: "Price  Countdown"
-                    return `${priceFormatted}   ${timerText}`;
+                    return timerText;
                 } catch (e) {
                     return '';
                 }
