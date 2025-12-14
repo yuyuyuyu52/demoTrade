@@ -2194,49 +2194,70 @@ export default function Chart({
         let ws = null;
         let isCancelled = false;
 
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = window.location.host;
-        const wsUrl = `${protocol}//${host}/api/accounts/ws/${user.id}`;
+        const initAccountStream = async () => {
+            try {
+                // Fetch/Create Account to get the correct account_id
+                const res = await fetch(`/api/accounts/?user_id=${user.id}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({}) // Empty body as user_id is a query param
+                });
 
-        console.log(`Connecting to Account WS: ${wsUrl}`);
-
-        const connect = () => {
-            ws = new WebSocket(wsUrl);
-
-            ws.onopen = () => {
-                if (isCancelled) {
-                    ws.close();
+                if (!res.ok) {
+                    console.error("Failed to fetch account for WS");
                     return;
                 }
-                console.log("Connected to Account Stream");
-            };
 
-            ws.onmessage = (event) => {
+                const account = await res.json();
                 if (isCancelled) return;
-                try {
-                    const msg = JSON.parse(event.data);
-                    if (msg.type === 'ACCOUNT_UPDATE') {
-                        // console.log("Received ACCOUNT_UPDATE, refreshing data...");
-                        updateOverlayData();
+
+                const accountId = account.id;
+
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const host = window.location.host;
+                const wsUrl = `${protocol}//${host}/api/accounts/ws/${accountId}`;
+
+                console.log(`Connecting to Account WS: ${wsUrl}`);
+
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    if (isCancelled) {
+                        ws.close();
+                        return;
                     }
-                } catch (e) {
-                    // console.error("Account WS Decode Error", e);
-                }
-            };
+                    console.log("Connected to Account Stream");
+                };
 
-            ws.onerror = (e) => {
-                if (isCancelled) return;
-                console.error("Account WS Error", e);
-            };
+                ws.onmessage = (event) => {
+                    if (isCancelled) return;
+                    try {
+                        const msg = JSON.parse(event.data);
+                        if (msg.type === 'ACCOUNT_UPDATE') {
+                            // console.log("Received ACCOUNT_UPDATE, refreshing data...");
+                            updateOverlayData();
+                        }
+                    } catch (e) {
+                        // console.error("Account WS Decode Error", e);
+                    }
+                };
 
-            ws.onclose = () => {
-                if (!isCancelled) {
-                    console.log("Account Stream Closed");
-                }
-            };
+                ws.onerror = (e) => {
+                    if (isCancelled) return;
+                    console.error("Account WS Error", e);
+                };
+
+                ws.onclose = () => {
+                    if (!isCancelled) {
+                        console.log("Account Stream Closed");
+                    }
+                };
+            } catch (err) {
+                console.error("Error determining account for WS", err);
+            }
         };
 
-        connect();
+        initAccountStream();
 
         return () => {
             isCancelled = true;
