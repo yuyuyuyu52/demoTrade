@@ -42,6 +42,8 @@ export default function Chart({
     const isLoadingRef = useRef(false);
     const hasMoreRef = useRef(true);
     const lastViewStateRef = useRef(null); // Store visible range/zoom to restore on next load
+    const magnetLineRef = useRef(null); // Reference for the visual magnet line
+    const lastMousePosRef = useRef(null); // Store last mouse position for keydown updates
 
     // Drawing Tools State (activeTool is prop)
     const [drawings, setDrawings] = useState([]);
@@ -1113,16 +1115,33 @@ export default function Chart({
                 return price;
             }
 
-            // Find the candle at or near this time
             const data = allDataRef.current;
-            let closestCandle = null;
-            let minTimeDiff = Infinity;
+            const t = Number(time);
 
-            for (const candle of data) {
-                const timeDiff = Math.abs(Number(candle.time) - Number(time));
-                if (timeDiff < minTimeDiff) {
-                    minTimeDiff = timeDiff;
-                    closestCandle = candle;
+            // Binary Search for efficiency
+            let left = 0;
+            let right = data.length - 1;
+            let closestCandle = null;
+            let minDiff = Infinity;
+
+            while (left <= right) {
+                const mid = Math.floor((left + right) / 2);
+                const item = data[mid];
+                const itemTime = Number(item.time);
+                const diff = Math.abs(itemTime - t);
+
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closestCandle = item;
+                }
+
+                if (itemTime < t) {
+                    left = mid + 1;
+                } else if (itemTime > t) {
+                    right = mid - 1;
+                } else {
+                    closestCandle = item;
+                    break;
                 }
             }
 
@@ -1148,6 +1167,28 @@ export default function Chart({
             }
 
             return closestPrice;
+        };
+
+        // Helper to update Magnet Line visibility and position
+        const updateMagnetLine = (x, y, isCommand) => {
+            if (!seriesRef.current || !magnetLineRef.current) return;
+
+            if (isCommand) {
+                const rawPrice = seriesRef.current.coordinateToPrice(y);
+                const rawTime = getTimeFromCoordinate(x);
+
+                if (rawPrice !== null && rawTime !== null) {
+                    const snappedPrice = snapToOHLC(rawTime, rawPrice, true);
+                    const snappedY = seriesRef.current.priceToCoordinate(snappedPrice);
+
+                    if (snappedY !== null) {
+                        magnetLineRef.current.style.display = 'block';
+                        magnetLineRef.current.style.top = `${snappedY}px`;
+                        return;
+                    }
+                }
+            }
+            magnetLineRef.current.style.display = 'none';
         };
 
         const handleMouseDown = (e) => {
@@ -1537,6 +1578,13 @@ export default function Chart({
             const rect = container.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
+            const isCommand = e.metaKey || e.ctrlKey;
+
+            // Track for keydown updates
+            lastMousePosRef.current = { x, y, isCommand };
+
+            // Update Snap Crosshair (Visual Only)
+            updateMagnetLine(x, y, isCommand);
 
             // Drawing Dragging
             if (dragStateRef.current) {
@@ -1737,14 +1785,36 @@ export default function Chart({
             }
         };
 
+        const handleWindowKeyDown = (e) => {
+            if (e.key === 'Meta' || e.key === 'Control') {
+                if (lastMousePosRef.current) {
+                    const { x, y } = lastMousePosRef.current;
+                    updateMagnetLine(x, y, true);
+                }
+            }
+        };
+
+        const handleWindowKeyUp = (e) => {
+            if (e.key === 'Meta' || e.key === 'Control') {
+                if (lastMousePosRef.current) {
+                    const { x, y } = lastMousePosRef.current;
+                    updateMagnetLine(x, y, false);
+                }
+            }
+        };
+
         container.addEventListener('mousedown', handleMouseDown);
         container.addEventListener('mousemove', handleMouseMove);
         window.addEventListener('mouseup', handleMouseUp);
+        window.addEventListener('keydown', handleWindowKeyDown);
+        window.addEventListener('keyup', handleWindowKeyUp);
 
         return () => {
             container.removeEventListener('mousedown', handleMouseDown);
             container.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
+            window.removeEventListener('keydown', handleWindowKeyDown);
+            window.removeEventListener('keyup', handleWindowKeyUp);
         };
     }, [updateOverlayData, activeTool]); // 移除 drawings 和 selectedDrawingId 依赖
 
@@ -2217,6 +2287,12 @@ export default function Chart({
                     style={{ height: '100%', width: '100%', backgroundColor: '#ffffff', cursor: draggingLine ? 'ns-resize' : 'default' }}
                 />
                 <div ref={labelsContainerRef} className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 10 }} />
+                {/* Magnet Line (Visual Feedback for Snap) */}
+                <div
+                    ref={magnetLineRef}
+                    className="absolute left-0 right-0 border-t border-dashed border-blue-500 pointer-events-none hidden"
+                    style={{ zIndex: 20, borderWidth: '1px', opacity: 0.8 }}
+                />
             </div>
         </div>
     );
