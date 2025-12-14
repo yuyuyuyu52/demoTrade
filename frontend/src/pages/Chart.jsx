@@ -144,7 +144,15 @@ export default function Chart({
                 wickDownColor: chartOptions.wickDownColor,
                 borderVisible: chartOptions.borderVisible,
                 borderColor: chartOptions.borderColor,
+                lastValueVisible: false, // Hide default label, replaced by CountdownPrimitive
             });
+
+            // Update CountdownPrimitive colors
+            if (countdownPrimitiveRef.current && countdownPrimitiveRef.current.updateOptions) {
+                countdownPrimitiveRef.current.updateOptions({
+                    colors: { up: chartOptions.upColor, down: chartOptions.downColor }
+                });
+            }
         }
     }, [chartOptions]);
 
@@ -1932,7 +1940,14 @@ export default function Chart({
                 if (seriesRef.current) seriesRef.current.detachPrimitive(countdownPrimitiveRef.current);
             } catch (e) { console.warn(e); }
         }
-        const countdownPrimitive = new CountdownPrimitive({ timeframe });
+        const countdownPrimitive = new CountdownPrimitive({
+            timeframe,
+            timezone,
+            colors: {
+                up: chartOptions.upColor,
+                down: chartOptions.downColor
+            }
+        });
         if (seriesRef.current) seriesRef.current.attachPrimitive(countdownPrimitive);
         countdownPrimitiveRef.current = countdownPrimitive;
 

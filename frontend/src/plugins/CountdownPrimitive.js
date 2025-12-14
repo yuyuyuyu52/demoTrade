@@ -1,9 +1,11 @@
-import { toNySeconds, timeframeToSeconds } from '../utils/time';
+import { toChartSeconds, timeframeToSeconds } from '../utils/time';
 
 export class CountdownPrimitive {
     constructor(options) {
         this._options = options || {};
         this._timeframe = this._options.timeframe || '1h';
+        this._timezone = this._options.timezone || 'Asia/Shanghai';
+        this._colors = this._options.colors || { up: '#26a69a', down: '#ef5350' };
         this._series = null;
         this._chart = null;
         this._intervalId = null;
@@ -31,8 +33,10 @@ export class CountdownPrimitive {
         this._requestUpdate = () => { };
     }
 
-    updateTimeframe(timeframe) {
-        this._timeframe = timeframe;
+    updateOptions(options) {
+        if (options.timeframe) this._timeframe = options.timeframe;
+        if (options.timezone) this._timezone = options.timezone;
+        if (options.colors) this._colors = options.colors;
         this._requestUpdate();
     }
 
@@ -46,8 +50,7 @@ export class CountdownPrimitive {
                     if (data.length === 0) return null;
                     const lastBar = data[data.length - 1];
                     const y = this._series.priceToCoordinate(lastBar.close);
-                    if (y === null) return null;
-                    return y + 25; // Shift down to avoid overlapping with the current price label
+                    return y; // Position exactly at price level
                 } catch (e) {
                     return null;
                 }
@@ -61,8 +64,8 @@ export class CountdownPrimitive {
 
                     const intervalSeconds = timeframeToSeconds(this._timeframe);
 
-                    // Use New York time for countdown to align with chart timestamps
-                    const now = toNySeconds(Date.now());
+                    // Use chart timezone (shifted) for proper countdown
+                    const now = toChartSeconds(Date.now(), this._timezone);
                     const nextBarTime = lastBar.time + intervalSeconds;
                     let remaining = nextBarTime - now;
 
@@ -72,16 +75,28 @@ export class CountdownPrimitive {
                     const m = Math.floor((remaining % 3600) / 60);
                     const s = remaining % 60;
 
-                    let text = '';
-                    if (h > 0) text += `${h}:`;
-                    text += `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-                    return text;
+                    let timerText = '';
+                    if (h > 0) timerText += `${h}:`;
+                    timerText += `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+
+                    // Format Price
+                    const priceFormatted = this._series.priceFormatter().format(lastBar.close);
+
+                    // Combine: "Price  Countdown"
+                    return `${priceFormatted}   ${timerText}`;
                 } catch (e) {
                     return '';
                 }
             },
             textColor: () => '#FFFFFF',
-            backColor: () => '#2962FF',
+            backColor: () => {
+                // Dynamic color based on last candle's direction
+                if (!this._series) return '#2962FF';
+                const data = this._series.data();
+                if (data.length === 0) return '#2962FF';
+                const lastBar = data[data.length - 1];
+                return lastBar.close >= lastBar.open ? this._colors.up : this._colors.down;
+            },
         }];
     }
 }
