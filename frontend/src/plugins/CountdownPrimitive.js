@@ -42,31 +42,56 @@ export class CountdownPrimitive {
 
     priceAxisViews() {
         if (!this._series || !this._chart) return [];
-        return [{
-            coordinate: () => {
-                if (!this._series || !this._chart) return null;
-                try {
-                    const data = this._series.data();
-                    if (data.length === 0) return null;
-                    const lastBar = data[data.length - 1];
-                    const y = this._series.priceToCoordinate(lastBar.close);
-                    return y + 22; // Render below the price label
-                } catch (e) {
-                    return null;
-                }
+
+        const getData = () => {
+            if (!this._series || !this._chart) return null;
+            try {
+                const data = this._series.data();
+                if (data.length === 0) return null;
+                const lastBar = data[data.length - 1];
+                const y = this._series.priceToCoordinate(lastBar.close);
+                return { lastBar, y };
+            } catch (e) {
+                return null;
+            }
+        };
+
+        const getColor = () => {
+            const d = getData();
+            if (!d) return '#2962FF';
+            return d.lastBar.close >= d.lastBar.open ? this._colors.up : this._colors.down;
+        };
+
+        return [
+            // View 1: Price
+            {
+                coordinate: () => {
+                    const d = getData();
+                    return d ? d.y : null;
+                },
+                text: () => {
+                    const d = getData();
+                    if (!d) return '';
+                    return this._series.priceFormatter().format(d.lastBar.close);
+                },
+                textColor: () => '#FFFFFF',
+                backColor: getColor,
             },
-            text: () => {
-                if (!this._series || !this._chart) return '';
-                try {
-                    const data = this._series.data();
-                    if (data.length === 0) return '';
-                    const lastBar = data[data.length - 1];
+            // View 2: Countdown (Below Price)
+            {
+                coordinate: () => {
+                    const d = getData();
+                    // Offset by ~22px to place below price label
+                    return d ? d.y + 22 : null;
+                },
+                text: () => {
+                    const d = getData();
+                    if (!d) return '';
 
                     const intervalSeconds = timeframeToSeconds(this._timeframe);
-
                     // Use chart timezone (shifted) for proper countdown
                     const now = toChartSeconds(Date.now(), this._timezone);
-                    const nextBarTime = lastBar.time + intervalSeconds;
+                    const nextBarTime = d.lastBar.time + intervalSeconds;
                     let remaining = nextBarTime - now;
 
                     if (remaining < 0) remaining = 0;
@@ -80,19 +105,10 @@ export class CountdownPrimitive {
                     timerText += `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 
                     return timerText;
-                } catch (e) {
-                    return '';
-                }
-            },
-            textColor: () => '#FFFFFF',
-            backColor: () => {
-                // Dynamic color based on last candle's direction
-                if (!this._series) return '#2962FF';
-                const data = this._series.data();
-                if (data.length === 0) return '#2962FF';
-                const lastBar = data[data.length - 1];
-                return lastBar.close >= lastBar.open ? this._colors.up : this._colors.down;
-            },
-        }];
+                },
+                textColor: () => '#FFFFFF',
+                backColor: getColor,
+            }
+        ];
     }
 }
