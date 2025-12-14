@@ -1964,7 +1964,7 @@ export default function Chart({
                 labelsContainerRef.current.innerHTML = '';
             }
         };
-    }, [timezone]);
+    }, []); // Mount once only
 
     // -------------------------------------------------------------------------
     // 2. Data & Symbol/Timeframe Logic
@@ -2195,7 +2195,7 @@ export default function Chart({
                 chartRef.current.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
             }
         };
-    }, [symbol, timeframe, timezone, user, updateOverlayData, updateFVGs]); // Re-run if timezone changes
+    }, [symbol, timeframe, timezone, user, updateOverlayData, updateFVGs]); // Re-run when symbol/timeframe/timezone changes
 
     // -------------------------------------------------------------------------
     // 2.5 Apply Timezone Change (Must be after Chart Init)
