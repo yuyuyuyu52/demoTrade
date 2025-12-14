@@ -1748,13 +1748,13 @@ export default function Chart({
         };
     }, [updateOverlayData, activeTool]); // 移除 drawings 和 selectedDrawingId 依赖
 
+    // -------------------------------------------------------------------------
+    // 1. Chart Instance Lifecycle (Mount Once)
+    // -------------------------------------------------------------------------
     useEffect(() => {
         if (!chartContainerRef.current) return;
 
-        let isDisposed = false;
-
-        console.log("Initializing chart...");
-        // Clear previous content
+        console.log("Initializing chart instance...");
         chartContainerRef.current.innerHTML = '';
 
         // Create Chart
@@ -1799,35 +1799,14 @@ export default function Chart({
 
         seriesRef.current = newSeries;
 
-        // Add Countdown Primitive
-        const countdownPrimitive = new CountdownPrimitive({ timeframe });
-        newSeries.attachPrimitive(countdownPrimitive);
-        countdownPrimitiveRef.current = countdownPrimitive;
-
-        // Add Drawings Primitive
+        // Attach Primitives (Holders)
         const drawingsPrimitive = new DrawingsPrimitive();
         newSeries.attachPrimitive(drawingsPrimitive);
         drawingsPrimitiveRef.current = drawingsPrimitive;
 
-        // Fix: Set interval immediately to ensure correct coordinate calculation
-        drawingsPrimitive.setInterval(timeframeToSeconds(timeframe));
-
-        // Restore drawings if any (though state is reset on mount usually, but if we persisted it...)
-        drawingsPrimitive.setDrawings(drawings);
-
-        // Add FVG Primitive
         const fvgPrimitive = new FVGPrimitive();
         newSeries.attachPrimitive(fvgPrimitive);
         fvgPrimitiveRef.current = fvgPrimitive;
-
-        // Force FVG update if data exists (fixes initial load issue)
-        // Use a timeout to ensure state is settled?
-        setTimeout(() => {
-            if (allDataRef.current.length > 0 && showFVG && fvgPrimitiveRef.current) {
-                const fvgs = calculateFVGs(allDataRef.current);
-                fvgPrimitiveRef.current.setFVGs(fvgs);
-            }
-        }, 100);
 
         // Subscribe to crosshair move to capture mouse price
         chart.subscribeCrosshairMove((param) => {
@@ -1839,301 +1818,8 @@ export default function Chart({
             }
         });
 
-        let ws = null;
-
-        const loadData = async (endTime = null) => {
-            if (isLoadingRef.current || isDisposed) return;
-            if (endTime && !hasMoreRef.current) return;
-
-            console.log(`Loading data... endTime=${endTime}, symbol=${symbol}, timeframe=${timeframe}`);
-            isLoadingRef.current = true;
-
-            try {
-                setError(null);
-                // Use proxy for Binance API to avoid CORS
-                let url = `/api/market/klines?symbol=${symbol}&interval=${timeframe}&limit=1000`;
-                if (endTime) {
-                    url += `&endTime=${endTime}`;
-                }
-
-                const response = await fetch(url);
-
-                if (isDisposed) return; // Check again after await
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const data = await response.json();
-
-                if (isDisposed) return; // Check again after await
-
-                if (!Array.isArray(data)) {
-                    throw new Error("Invalid data format");
-                }
-
-                console.log(`Loaded ${data.length} candles`);
-
-                const cdata = data.map(d => {
-                    const originalMs = d[0];
-                    const t = toNySeconds(originalMs);
-                    return {
-                        time: t,
-                        originalTimeMs: originalMs,
-                        open: parseFloat(d[1]),
-                        high: parseFloat(d[2]),
-                        low: parseFloat(d[3]),
-                        close: parseFloat(d[4]),
-                    };
-                });
-
-                // Dedup cdata internally using NY-shifted time (chart key must be strictly increasing)
-                const uniqueCData = [];
-                const seenTimes = new Set();
-                for (const item of cdata) {
-                    if (!seenTimes.has(item.time)) {
-                        seenTimes.add(item.time);
-                        uniqueCData.push(item);
-                    }
-                }
-
-                if (uniqueCData.length === 0) {
-                    if (endTime) hasMoreRef.current = false;
-                } else {
-                    if (endTime) {
-                        // Prepend data
-                        // Filter out duplicates based on chart time key (NY shifted)
-                        const existingTimes = new Set(allDataRef.current.map(d => d.time));
-                        const uniqueNewData = uniqueCData.filter(d => !existingTimes.has(d.time));
-
-                        if (uniqueNewData.length === 0) {
-                            hasMoreRef.current = false;
-                        } else {
-                            // Merge and Sort
-                            allDataRef.current = [...uniqueNewData, ...allDataRef.current].sort((a, b) => a.time - b.time);
-
-                            // Double check for duplicates after merge (paranoid check)
-                            const finalData = [];
-                            const finalTimes = new Set();
-                            for (const item of allDataRef.current) {
-                                if (!finalTimes.has(item.time)) {
-                                    finalTimes.add(item.time);
-                                    finalData.push(item);
-                                }
-                            }
-                            allDataRef.current = finalData;
-                        }
-                    } else {
-                        // Initial load
-                        allDataRef.current = uniqueCData;
-                        hasMoreRef.current = true;
-                    }
-
-                    // Check if series is still valid before setting data
-                    if (seriesRef.current && chartRef.current && !isDisposed) {
-                        seriesRef.current.setData(allDataRef.current);
-                        // Ensure visible range is set correctly for initial load
-                        if (!endTime) {
-                            const restoreState = lastViewStateRef.current;
-                            let restored = false;
-
-                            if (restoreState) {
-                                // Try to restore
-                                const timeScale = chartRef.current.timeScale();
-                                const totalBars = allDataRef.current.length;
-
-                                if (restoreState.shouldKeepRightOffset) {
-                                    // User was at the right edge or looking at latest data
-                                    // Preserve "Zoom Level" (slots) and keep right edge alignment
-                                    const visibleSlots = restoreState.visibleSlots;
-
-                                    // If user was "zoomed really small" (large slots), or "very large" (small slots)
-                                    // We keep that density.
-
-                                    // Calculate new Logical Range to align right
-                                    // Original logic: rightOffset = visibleSlots * 0.25
-                                    // If we just want to match 'visibleSlots', we can use setVisibleLogicalRange
-                                    // Assuming logical indices match (0 to N-1).
-
-                                    const logicalTo = (totalBars - 1) + (restoreState.rightOffset || Math.round(visibleSlots * 0.25));
-                                    const logicalFrom = logicalTo - visibleSlots;
-
-                                    timeScale.setVisibleLogicalRange({
-                                        from: logicalFrom,
-                                        to: logicalTo
-                                    });
-                                    restored = true;
-                                } else if (restoreState.visibleTimeRange) {
-                                    // User was looking at history
-                                    // Try to restore Time Range
-                                    timeScale.setVisibleRange(restoreState.visibleTimeRange);
-                                    // Note: if time range is invalid for new symbol/timeframe, this might default
-                                    restored = true;
-                                }
-                            }
-
-                            if (!restored) {
-                                // Default: 180 candles, 1/4 right spacing
-                                const totalBars = allDataRef.current.length;
-                                const visibleSlots = 180;
-                                const rightOffset = Math.round(visibleSlots * 0.25);
-
-                                const logicalTo = (totalBars - 1) + rightOffset;
-                                const logicalFrom = logicalTo - visibleSlots;
-
-                                chartRef.current.timeScale().setVisibleLogicalRange({
-                                    from: logicalFrom,
-                                    to: logicalTo
-                                });
-                            }
-
-                            isChartReadyRef.current = true; // Mark chart as ready for WS updates
-                        }
-                    }
-
-                    if (!endTime && cdata.length > 0) {
-                        const lastClose = cdata[cdata.length - 1].close;
-                        lastPriceRef.current = lastClose;
-                        setCurrentPrice(lastClose);
-                    }
-                }
-
-                // Update FVGs - use ref to get latest showFVG value
-                if (fvgPrimitiveRef.current) {
-                    if (showFVGRef.current) {
-                        const fvgs = calculateFVGs(allDataRef.current);
-                        fvgPrimitiveRef.current.setFVGs(fvgs);
-                    } else {
-                        fvgPrimitiveRef.current.setFVGs([]);
-                    }
-                }
-
-                // Initial overlay update (only on first load)
-                if (!endTime && !isDisposed) {
-                    updateOverlayData();
-                }
-
-            } catch (err) {
-                if (isDisposed) return;
-                console.error("Chart Error:", err);
-                setError(err.message);
-            } finally {
-                isLoadingRef.current = false;
-            }
-        };
-
-        // Initial load
-        loadData();
-
-        // Subscribe to visible logical range change for infinite scrolling
-        let scrollTimeout = null;
-        chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-            if (scrollTimeout || isDisposed) return; // Throttle
-
-            scrollTimeout = setTimeout(() => {
-                scrollTimeout = null;
-                if (isDisposed) return;
-                if (range && range.from < 10 && !isLoadingRef.current && hasMoreRef.current) {
-                    const firstData = allDataRef.current[0];
-                    if (firstData) {
-                        // Binance API expects milliseconds for endTime (exchange time)
-                        // Use originalTimeMs to request data before the earliest candle we have.
-                        loadData(firstData.originalTimeMs - 1);
-                    }
-                }
-            }, 200); // Check every 200ms
-        });
-
-        // WebSocket
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = window.location.host;
-        // Use local proxy to avoid CORS/Network issues
-        const wsUrl = `${protocol}//${host}/api/market/ws/klines/${symbol}/${timeframe}`;
-
-        let wsTimeout = setTimeout(() => {
-            if (isDisposed) return;
-            ws = new WebSocket(wsUrl);
-
-            ws.onopen = () => {
-                console.log('Connected to WS Proxy');
-            };
-
-            ws.onmessage = (event) => {
-                if (isDisposed) return;
-                // Prevent WS updates before initial history is loaded
-                if (!isChartReadyRef.current) return;
-
-                try {
-                    const message = JSON.parse(event.data);
-                    if (!message.k) return;
-
-                    const kline = message.k;
-                    const open = parseFloat(kline.o);
-                    const high = parseFloat(kline.h);
-                    const low = parseFloat(kline.l);
-                    const close = parseFloat(kline.c);
-
-                    // Filter out invalid prices (0 or NaN) which can happen with fstream
-                    if (!open || !high || !low || !close || open <= 0 || high <= 0 || low <= 0 || close <= 0) {
-                        return;
-                    }
-
-                    const candle = {
-                        time: toNySeconds(kline.t),
-                        originalTimeMs: kline.t,
-                        open: open,
-                        high: high,
-                        low: low,
-                        close: close,
-                    };
-
-                    // Update Price Display
-                    if (lastPriceRef.current) {
-                        if (close > lastPriceRef.current) {
-                            setPriceColor('text-green-600');
-                        } else if (close < lastPriceRef.current) {
-                            setPriceColor('text-red-600');
-                        }
-                    }
-                    setCurrentPrice(close);
-                    lastPriceRef.current = close;
-
-                    // Check validity before update
-                    if (seriesRef.current && chartRef.current && !isDisposed) {
-                        newSeries.update(candle);
-
-                        // Update internal data for FVG calculation
-                        // We need to update the last candle in allDataRef or append if new
-                        const lastData = allDataRef.current[allDataRef.current.length - 1];
-                        if (lastData && lastData.time === candle.time) {
-                            allDataRef.current[allDataRef.current.length - 1] = candle;
-                        } else if (!lastData || candle.time > lastData.time) {
-                            allDataRef.current.push(candle);
-                        } else {
-                            // Out-of-order WS update; ignore to keep ascending time
-                        }
-
-                        // Throttle FVG updates? Or just update.
-                        // For now, update every time.
-                        updateFVGs();
-                    }
-                } catch (e) {
-                    console.error("WS Message Error:", e);
-                }
-            };
-
-            ws.onerror = (err) => {
-                // Ignore errors if we are disposing/unmounting
-                if (isDisposed) return;
-                console.error('WS Error:', err);
-            };
-        }, 100); // Delay WS connection slightly
-
-        // Poll for overlay updates every 5 seconds
-        const overlayInterval = setInterval(updateOverlayData, 5000);
-
+        // Resize Observer
         const handleResize = () => {
-            if (isDisposed) return;
             if (chartContainerRef.current && chartRef.current) {
                 try {
                     chartRef.current.applyOptions({
@@ -2147,7 +1833,6 @@ export default function Chart({
         };
 
         const resizeObserver = new ResizeObserver(() => {
-            // Use requestAnimationFrame to avoid "ResizeObserver loop limit exceeded" 
             requestAnimationFrame(() => handleResize());
         });
 
@@ -2159,26 +1844,18 @@ export default function Chart({
         let animationFrameId;
 
         const syncLabels = () => {
-            if (isDisposed) return; // Stop if disposed
-
             if (seriesRef.current && priceLinesRef.current.length > 0) {
                 priceLinesRef.current.forEach(item => {
-                    if (item.labelElement) {
-                        // Check if series is still valid before accessing
+                    if (item.labelElement && chartRef.current && seriesRef.current) {
                         try {
-                            // Double check chart existence
-                            if (!chartRef.current) return;
-
                             const y = seriesRef.current.priceToCoordinate(item.price);
                             if (y === null) {
                                 item.labelElement.style.display = 'none';
                             } else {
-                                item.labelElement.style.display = 'flex'; // Changed to flex for buttons
+                                item.labelElement.style.display = 'flex';
                                 item.labelElement.style.top = `${y}px`;
                             }
-                        } catch (e) {
-                            // Series might be disposed
-                        }
+                        } catch (e) { }
                     }
                 });
             }
@@ -2186,90 +1863,264 @@ export default function Chart({
         };
         syncLabels();
 
+        // Restore drawings if any (from initial state)
+        if (drawingsRef.current.length > 0) {
+            drawingsPrimitive.setDrawings(drawingsRef.current);
+        }
+
         return () => {
-            // Save state before destroy
-            if (chartRef.current && seriesRef.current && !isDisposed) {
-                try {
-                    const timeScale = chartRef.current.timeScale();
-                    const logicalRange = timeScale.getVisibleLogicalRange();
-                    if (logicalRange) {
-                        const barsCnt = allDataRef.current.length;
-                        // "At Edge" definition: showing the last bar or within small margin
-                        // Logic: if logicalRange.to is >= barsCnt - X
-                        const distFromRight = (barsCnt - 1) - logicalRange.to;
-                        // If distFromRight is negative, we are past the last bar (whitespace). 
-                        // If distFromRight is large positive, we are in history.
-                        const isAtEdge = distFromRight < 20; // 20 bars tolerance
-
-                        const visibleSlots = logicalRange.to - logicalRange.from;
-                        const visibleTimeRange = timeScale.getVisibleRange();
-
-                        lastViewStateRef.current = {
-                            shouldKeepRightOffset: isAtEdge,
-                            visibleSlots: visibleSlots,
-                            rightOffset: Math.max(0, Math.round(logicalRange.to - (barsCnt - 1))), // Capture actual whitespace used
-                            visibleTimeRange: visibleTimeRange
-                        };
-                    }
-                } catch (e) {
-                    console.error("Failed to save chart state", e);
-                }
-            }
-
-            isDisposed = true; // Mark as disposed
-            if (resizeObserver) resizeObserver.disconnect();
+            console.log("Destroying chart instance...");
+            resizeObserver.disconnect();
             cancelAnimationFrame(animationFrameId);
-            clearInterval(overlayInterval);
-            if (scrollTimeout) clearTimeout(scrollTimeout);
-            if (wsTimeout) clearTimeout(wsTimeout);
 
-            if (ws) {
-                // Avoid "WebSocket is closed before the connection is established" if possible
-                if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN) {
-                    ws.close();
-                }
+            if (chartRef.current) {
+                chartRef.current.remove();
             }
 
-            // Clean up chart
-            // Important: Remove series first, then chart
-            try {
-                if (seriesRef.current) {
-                    if (countdownPrimitiveRef.current) {
-                        seriesRef.current.detachPrimitive(countdownPrimitiveRef.current);
-                    }
-                    if (markersPrimitiveRef.current) {
-                        // markersPrimitiveRef.current is the primitive instance
-                        seriesRef.current.detachPrimitive(markersPrimitiveRef.current);
-                    }
-                    if (drawingsPrimitiveRef.current) {
-                        seriesRef.current.detachPrimitive(drawingsPrimitiveRef.current);
-                    }
-                }
-
-                if (chart) {
-                    chart.remove();
-                }
-            } catch (e) {
-                console.error("Error removing chart", e);
-            }
-
+            // Clear refs
+            chartRef.current = null;
             seriesRef.current = null;
             markersPrimitiveRef.current = null;
             countdownPrimitiveRef.current = null;
             drawingsPrimitiveRef.current = null;
             fvgPrimitiveRef.current = null;
-            chartRef.current = null;
 
-            // Reset loading state to allow new fetches on remount
-            isLoadingRef.current = false;
-            isChartReadyRef.current = false;
-
-            // Clear labels
             if (labelsContainerRef.current) {
                 labelsContainerRef.current.innerHTML = '';
             }
         };
-    }, [symbol, timeframe, user, updateOverlayData]); // Re-run if user changes
+    }, []);
+
+    // -------------------------------------------------------------------------
+    // 2. Data & Symbol/Timeframe Logic
+    // -------------------------------------------------------------------------
+    useEffect(() => {
+        // Wait for chart instance
+        if (!chartRef.current || !seriesRef.current) return;
+
+        let isCancelled = false;
+        let ws = null;
+        let wsTimeout = null;
+        let scrollTimeout = null;
+        let overlayInterval = null;
+
+        // 2.1 Update Timeframe-dependent Primitives
+        // Countdown: Detach old, attach new
+        if (countdownPrimitiveRef.current) {
+            try {
+                if (seriesRef.current) seriesRef.current.detachPrimitive(countdownPrimitiveRef.current);
+            } catch (e) { console.warn(e); }
+        }
+        const countdownPrimitive = new CountdownPrimitive({ timeframe });
+        if (seriesRef.current) seriesRef.current.attachPrimitive(countdownPrimitive);
+        countdownPrimitiveRef.current = countdownPrimitive;
+
+        // Drawings Interval
+        if (drawingsPrimitiveRef.current) {
+            drawingsPrimitiveRef.current.setInterval(timeframeToSeconds(timeframe));
+        }
+
+        // 2.2 Reset Data buffers
+        // We do NOT clear series data immediately to preserve "ghost" data while loading.
+        // However, we reset the internal buffer.
+        allDataRef.current = [];
+        hasMoreRef.current = true;
+        isLoadingRef.current = false;
+        isChartReadyRef.current = false;
+
+        // 2.3 Load Data Function
+        const loadData = async (endTime = null) => {
+            if (isLoadingRef.current || isCancelled) return;
+            if (endTime && !hasMoreRef.current) return;
+
+            console.log(`Loading data... symbol=${symbol} timeframe=${timeframe}`);
+            isLoadingRef.current = true;
+
+            try {
+                setError(null);
+                let url = `/api/market/klines?symbol=${symbol}&interval=${timeframe}&limit=1000`;
+                if (endTime) {
+                    url += `&endTime=${endTime}`;
+                }
+
+                const response = await fetch(url);
+                if (isCancelled) return;
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                if (isCancelled) return;
+
+                if (!Array.isArray(data)) {
+                    throw new Error("Invalid data format");
+                }
+
+                const cdata = data.map(d => ({
+                    time: toNySeconds(d[0]),
+                    originalTimeMs: d[0],
+                    open: parseFloat(d[1]),
+                    high: parseFloat(d[2]),
+                    low: parseFloat(d[3]),
+                    close: parseFloat(d[4]),
+                }));
+
+                // Deduplicate logic
+                const uniqueCData = [];
+                const seenTimes = new Set();
+                cdata.forEach(item => {
+                    if (!seenTimes.has(item.time)) {
+                        seenTimes.add(item.time);
+                        uniqueCData.push(item);
+                    }
+                });
+
+                if (uniqueCData.length === 0) {
+                    if (endTime) hasMoreRef.current = false;
+                } else {
+                    if (endTime) {
+                        // Merge (Infinite Scroll)
+                        const existingTimes = new Set(allDataRef.current.map(d => d.time));
+                        const uniqueNewData = uniqueCData.filter(d => !existingTimes.has(d.time));
+
+                        if (uniqueNewData.length === 0) {
+                            hasMoreRef.current = false;
+                        } else {
+                            allDataRef.current = [...uniqueNewData, ...allDataRef.current].sort((a, b) => a.time - b.time);
+                        }
+                    } else {
+                        // Initial Load
+                        allDataRef.current = uniqueCData;
+                        hasMoreRef.current = true;
+                    }
+
+                    // Update Series
+                    if (seriesRef.current && chartRef.current && !isCancelled) {
+                        seriesRef.current.setData(allDataRef.current);
+
+                        if (!endTime) {
+                            isChartReadyRef.current = true;
+                            // Since we preserve the instance, auto-scale might be needed if price range differs drastically
+                            // seriesRef.current.applyOptions({ autoScale: true }); // Make sure autoScale is on?
+                            // Default is usually fine.
+                        }
+                    }
+
+                    // Update Current Price
+                    if (!endTime && cdata.length > 0) {
+                        const lastClose = cdata[cdata.length - 1].close;
+                        lastPriceRef.current = lastClose;
+                        setCurrentPrice(lastClose);
+                    }
+
+                    // Update FVGs
+                    updateFVGs();
+
+                    // Update Overlay
+                    if (!endTime) updateOverlayData();
+                }
+
+            } catch (err) {
+                if (isCancelled) return;
+                console.error("Load Data Error:", err);
+                setError(err.message);
+            } finally {
+                isLoadingRef.current = false;
+            }
+        };
+
+        // Load Initial Data
+        loadData();
+
+        // 2.4 WebSocket Setup
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        const wsUrl = `${protocol}//${host}/api/market/ws/klines/${symbol}/${timeframe}`;
+
+        wsTimeout = setTimeout(() => {
+            if (isCancelled) return;
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('Connected to WS');
+            };
+
+            ws.onmessage = (event) => {
+                if (isCancelled || !isChartReadyRef.current) return;
+                try {
+                    const message = JSON.parse(event.data);
+                    if (!message.k) return;
+
+                    const kline = message.k;
+                    const candle = {
+                        time: toNySeconds(kline.t),
+                        originalTimeMs: kline.t,
+                        open: parseFloat(kline.o),
+                        high: parseFloat(kline.h),
+                        low: parseFloat(kline.l),
+                        close: parseFloat(kline.c),
+                    };
+
+                    if (candle.open > 0 && seriesRef.current) {
+                        newSeries.update(candle);
+
+                        // Update buffer
+                        const lastData = allDataRef.current[allDataRef.current.length - 1];
+                        if (lastData && lastData.time === candle.time) {
+                            allDataRef.current[allDataRef.current.length - 1] = candle;
+                        } else if (!lastData || candle.time > lastData.time) {
+                            allDataRef.current.push(candle);
+                        }
+
+                        // Update Price Display
+                        if (lastPriceRef.current) {
+                            if (candle.close > lastPriceRef.current) setPriceColor('text-green-600');
+                            else if (candle.close < lastPriceRef.current) setPriceColor('text-red-600');
+                        }
+                        setCurrentPrice(candle.close);
+                        lastPriceRef.current = candle.close;
+
+                        updateFVGs();
+                    }
+                } catch (e) {
+                    console.error("WS Error", e);
+                }
+            };
+        }, 500);
+
+        // 2.5 Infinite Scroll Listener
+        const handleVisibleRangeChange = (range) => {
+            if (scrollTimeout || isCancelled) return;
+            scrollTimeout = setTimeout(() => {
+                scrollTimeout = null;
+                if (isCancelled) return;
+                if (range && range.from < 10 && !isLoadingRef.current && hasMoreRef.current) {
+                    const firstData = allDataRef.current[0];
+                    if (firstData) {
+                        loadData(firstData.originalTimeMs - 1);
+                    }
+                }
+            }, 200);
+        };
+
+        chartRef.current.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
+
+        // Overlay Interval
+        overlayInterval = setInterval(updateOverlayData, 5000);
+
+        return () => {
+            isCancelled = true;
+            if (ws) ws.close();
+            if (wsTimeout) clearTimeout(wsTimeout);
+            if (scrollTimeout) clearTimeout(scrollTimeout);
+            if (overlayInterval) clearInterval(overlayInterval);
+
+            if (chartRef.current) {
+                chartRef.current.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
+            }
+        };
+    }, [symbol, timeframe, user, updateOverlayData, updateFVGs]); // Re-run if user changes
 
     return (
         <div
