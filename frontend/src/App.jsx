@@ -31,7 +31,7 @@ function AppRoutes() {
         <Route path="equity" element={<EquityCurve />} />
         <Route path="calendar" element={<Calendar />} />
         <Route path="statistics" element={<Statistics />} />
-        <Route path="chart" element={<MultiChart />} />
+        <Route path="chart" element={<div />} />
       </Route>
     </Routes>
   );

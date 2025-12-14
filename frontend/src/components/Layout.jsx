@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { LayoutDashboard, History, LineChart, Calendar, BarChart2, TrendingUp, Menu, ChevronLeft, ChevronRight } from 'lucide-react';
+import MultiChart from '../pages/MultiChart';
 
 export default function Layout() {
   const { user } = useAuth();
@@ -66,9 +67,12 @@ export default function Layout() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 overflow-auto transition-all duration-300">
-        <div className="p-4 md:p-8">
+      <div className={`flex-1 transition-all duration-300 ${location.pathname === '/chart' ? 'overflow-hidden' : 'overflow-auto'}`}>
+        <div className={location.pathname === '/chart' ? 'hidden' : 'p-4 md:p-8'}>
           <Outlet />
+        </div>
+        <div className={location.pathname === '/chart' ? 'block h-full' : 'hidden'}>
+          <MultiChart />
         </div>
       </div>
     </div>
