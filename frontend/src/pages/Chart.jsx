@@ -145,17 +145,7 @@ export default function Chart({
         }
     }, [chartOptions]);
 
-    // Apply Timezone Change
-    useEffect(() => {
-        if (chartRef.current) {
-            chartRef.current.applyOptions({
-                localization: {
-                    timezone: timezone,
-                    dateFormat: 'yyyy-MM-dd',
-                },
-            });
-        }
-    }, [timezone]);
+
 
     // Fetch Settings from Backend
     // FVG Calculation
@@ -2199,6 +2189,28 @@ export default function Chart({
             }
         };
     }, [symbol, timeframe, user, updateOverlayData, updateFVGs]); // Re-run if user changes
+
+    // -------------------------------------------------------------------------
+    // 2.5 Apply Timezone Change (Must be after Chart Init)
+    // -------------------------------------------------------------------------
+    useEffect(() => {
+        if (!chartRef.current) return;
+
+        console.log(`[Chart] Applying timezone: ${timezone}`);
+        try {
+            chartRef.current.applyOptions({
+                localization: {
+                    locale: 'en-US', // Ensure locale is set
+                    timezone: timezone,
+                    dateFormat: 'yyyy-MM-dd',
+                },
+            });
+            // Force a slight timescale update to ensure labels redraw (hack)
+            // chartRef.current.timeScale().fitContent(); 
+        } catch (e) {
+            console.error("[Chart] Failed to apply timezone", e);
+        }
+    }, [timezone, isChartReadyRef.current]); // Depend on readiness too? No, just timezone. But make sure chart is valid.
 
     // -------------------------------------------------------------------------
     // 3. Account WebSocket (User Data Stream)
