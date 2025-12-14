@@ -42,8 +42,6 @@ export default function Chart({
     const isLoadingRef = useRef(false);
     const hasMoreRef = useRef(true);
     const lastViewStateRef = useRef(null); // Store visible range/zoom to restore on next load
-    const magnetLineRef = useRef(null); // Reference for the visual magnet line
-    const lastMousePosRef = useRef(null); // Store last mouse position for keydown updates
 
     // Drawing Tools State (activeTool is prop)
     const [drawings, setDrawings] = useState([]);
@@ -1109,43 +1107,59 @@ export default function Chart({
             return lastTime + (diff * interval);
         };
 
-        // Helper to snap price to nearest OHLC when Command/Ctrl is held
-        const snapToOHLC = (time, price, useSnap) => {
-            if (!useSnap || !allDataRef.current || allDataRef.current.length === 0) {
-                return price;
+        // Helper to get nearest OHLC data when Command/Ctrl is held
+        const getMagnetData = (time, price, useSnap) => {
+            if (!allDataRef.current || allDataRef.current.length === 0) {
+                return { time, price };
             }
 
-            const data = allDataRef.current;
-            const t = Number(time);
+            // If not snapping, just return original
+            if (!useSnap) return { time, price };
 
-            // Binary Search for efficiency
+            // Find the candle at or near this time
+            const data = allDataRef.current;
+            let closestCandle = null;
+
+            // Binary search for efficiency
             let left = 0;
             let right = data.length - 1;
-            let closestCandle = null;
-            let minDiff = Infinity;
 
+            // First find closest by index/time
+            // Since data is sorted by time
             while (left <= right) {
                 const mid = Math.floor((left + right) / 2);
                 const item = data[mid];
-                const itemTime = Number(item.time);
-                const diff = Math.abs(itemTime - t);
 
-                if (diff < minDiff) {
-                    minDiff = diff;
-                    closestCandle = item;
-                }
-
-                if (itemTime < t) {
-                    left = mid + 1;
-                } else if (itemTime > t) {
-                    right = mid - 1;
-                } else {
+                if (item.time === time) {
                     closestCandle = item;
                     break;
                 }
+
+                if (item.time < time) {
+                    left = mid + 1;
+                } else {
+                    right = mid - 1;
+                }
             }
 
-            if (!closestCandle) return price;
+            if (!closestCandle) {
+                // If exact match not found, look around 'right' (insertion point)
+                // 'left' is at the first element > time or data.length
+                // Candidates are data[left-1] and data[left]
+                const c1 = data[left - 1];
+                const c2 = data[left];
+
+                if (c1 && c2) {
+                    if (Math.abs(c1.time - time) < Math.abs(c2.time - time)) closestCandle = c1;
+                    else closestCandle = c2;
+                } else if (c1) {
+                    closestCandle = c1;
+                } else if (c2) {
+                    closestCandle = c2;
+                }
+            }
+
+            if (!closestCandle) return { time, price };
 
             // Find closest OHLC value
             const ohlc = [
@@ -1166,29 +1180,7 @@ export default function Chart({
                 }
             }
 
-            return closestPrice;
-        };
-
-        // Helper to update Magnet Line visibility and position
-        const updateMagnetLine = (x, y, isCommand) => {
-            if (!seriesRef.current || !magnetLineRef.current) return;
-
-            if (isCommand) {
-                const rawPrice = seriesRef.current.coordinateToPrice(y);
-                const rawTime = getTimeFromCoordinate(x);
-
-                if (rawPrice !== null && rawTime !== null) {
-                    const snappedPrice = snapToOHLC(rawTime, rawPrice, true);
-                    const snappedY = seriesRef.current.priceToCoordinate(snappedPrice);
-
-                    if (snappedY !== null) {
-                        magnetLineRef.current.style.display = 'block';
-                        magnetLineRef.current.style.top = `${snappedY}px`;
-                        return;
-                    }
-                }
-            }
-            magnetLineRef.current.style.display = 'none';
+            return { time: closestCandle.time, price: closestPrice };
         };
 
         const handleMouseDown = (e) => {
@@ -1201,11 +1193,13 @@ export default function Chart({
             // Drawing Logic
             if (activeTool !== 'cursor') {
                 let price = seriesRef.current.coordinateToPrice(mouseY);
-                const time = getTimeFromCoordinate(mouseX);
+                let time = getTimeFromCoordinate(mouseX);
 
                 if (price !== null && time !== null) {
                     // Apply OHLC snap if Command/Ctrl is held
-                    price = snapToOHLC(time, price, e.metaKey || e.ctrlKey);
+                    const magnet = getMagnetData(time, price, e.metaKey || e.ctrlKey);
+                    time = magnet.time;
+                    price = magnet.price;
 
                     if (!currentDrawingRef.current) {
                         // Special Case: Long/Short Tools (Single Click Creation)
@@ -1578,22 +1572,34 @@ export default function Chart({
             const rect = container.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
-            const isCommand = e.metaKey || e.ctrlKey;
 
-            // Track for keydown updates
-            lastMousePosRef.current = { x, y, isCommand };
-
-            // Update Snap Crosshair (Visual Only)
-            updateMagnetLine(x, y, isCommand);
+            // Handle Crosshair Snapping (Magnet)
+            // Even if not dragging/drawing, snap crosshair if Meta is held
+            if (e.metaKey || e.ctrlKey) {
+                const hoverPrice = seriesRef.current.coordinateToPrice(y);
+                const hoverTime = getTimeFromCoordinate(x);
+                if (hoverPrice !== null && hoverTime !== null) {
+                    const magnet = getMagnetData(hoverTime, hoverPrice, true);
+                    chartRef.current.setCrosshairPosition(magnet.price, magnet.time, seriesRef.current);
+                }
+            } else {
+                // If snap release, we might want to clear crosshair position overriding.
+                // However, lightweight-charts clearCrosshairPosition removes it.
+                // We want default behavior which tracks mouse.
+                // call clearCrosshairPosition() forces it to hide? No, it clears the FIXED position.
+                chartRef.current.clearCrosshairPosition();
+            }
 
             // Drawing Dragging
             if (dragStateRef.current) {
                 let price = seriesRef.current.coordinateToPrice(y);
-                const time = getTimeFromCoordinate(x);
+                let time = getTimeFromCoordinate(x);
 
                 if (price !== null && time !== null) {
                     // Apply OHLC snap if Command/Ctrl is held
-                    price = snapToOHLC(time, price, e.metaKey || e.ctrlKey);
+                    const magnet = getMagnetData(time, price, e.metaKey || e.ctrlKey);
+                    time = magnet.time;
+                    price = magnet.price;
 
                     const { drawingId, pointIndex } = dragStateRef.current;
 
@@ -1646,8 +1652,8 @@ export default function Chart({
                                     if (newD.p3) newD.p3 = { ...newD.p3, time: newTime };
                                 } else {
                                     // Rect: x2, y1 -> modify p2.x, p1.y
-                                    newD.p2 = { ...newD.p2, time: constrainedPoint.time };
-                                    newD.p1 = { ...newD.p1, price: constrainedPoint.price };
+                                    newD.p1 = { ...newD.p1, price: newPoint.price };
+                                    newD.p2 = { ...newD.p2, time: newPoint.time };
                                 }
                             }
 
@@ -1666,11 +1672,13 @@ export default function Chart({
             // Drawing Logic
             if (currentDrawingRef.current) {
                 let price = seriesRef.current.coordinateToPrice(y);
-                const time = getTimeFromCoordinate(x);
+                let time = getTimeFromCoordinate(x);
 
                 if (price !== null && time !== null) {
                     // Apply OHLC snap if Command/Ctrl is held
-                    price = snapToOHLC(time, price, e.metaKey || e.ctrlKey);
+                    const magnet = getMagnetData(time, price, e.metaKey || e.ctrlKey);
+                    time = magnet.time;
+                    price = magnet.price;
 
                     let targetPrice = price;
 
@@ -1785,36 +1793,14 @@ export default function Chart({
             }
         };
 
-        const handleWindowKeyDown = (e) => {
-            if (e.key === 'Meta' || e.key === 'Control') {
-                if (lastMousePosRef.current) {
-                    const { x, y } = lastMousePosRef.current;
-                    updateMagnetLine(x, y, true);
-                }
-            }
-        };
-
-        const handleWindowKeyUp = (e) => {
-            if (e.key === 'Meta' || e.key === 'Control') {
-                if (lastMousePosRef.current) {
-                    const { x, y } = lastMousePosRef.current;
-                    updateMagnetLine(x, y, false);
-                }
-            }
-        };
-
         container.addEventListener('mousedown', handleMouseDown);
         container.addEventListener('mousemove', handleMouseMove);
         window.addEventListener('mouseup', handleMouseUp);
-        window.addEventListener('keydown', handleWindowKeyDown);
-        window.addEventListener('keyup', handleWindowKeyUp);
 
         return () => {
             container.removeEventListener('mousedown', handleMouseDown);
             container.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
-            window.removeEventListener('keydown', handleWindowKeyDown);
-            window.removeEventListener('keyup', handleWindowKeyUp);
         };
     }, [updateOverlayData, activeTool]); // 移除 drawings 和 selectedDrawingId 依赖
 
@@ -2287,12 +2273,6 @@ export default function Chart({
                     style={{ height: '100%', width: '100%', backgroundColor: '#ffffff', cursor: draggingLine ? 'ns-resize' : 'default' }}
                 />
                 <div ref={labelsContainerRef} className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 10 }} />
-                {/* Magnet Line (Visual Feedback for Snap) */}
-                <div
-                    ref={magnetLineRef}
-                    className="absolute left-0 right-0 border-t border-dashed border-blue-500 pointer-events-none hidden"
-                    style={{ zIndex: 20, borderWidth: '1px', opacity: 0.8 }}
-                />
             </div>
         </div>
     );
