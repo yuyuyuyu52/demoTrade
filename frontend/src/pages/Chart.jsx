@@ -1849,7 +1849,7 @@ export default function Chart({
             },
             localization: {
                 locale: 'en-US',
-                timezone: TIMEZONE,
+                timezone: timezone, // Use state instead of constant
                 dateFormat: 'yyyy-MM-dd',
             },
         });
@@ -1866,6 +1866,13 @@ export default function Chart({
         });
 
         seriesRef.current = newSeries;
+
+        // Restore Data instantly if available (e.g. after timezone switch)
+        if (allDataRef.current && allDataRef.current.length > 0) {
+            newSeries.setData(allDataRef.current);
+            // Optionally autoScale?
+            // chart.timeScale().fitContent();
+        }
 
         // Attach Primitives (Holders)
         const drawingsPrimitive = new DrawingsPrimitive();
@@ -1957,7 +1964,7 @@ export default function Chart({
                 labelsContainerRef.current.innerHTML = '';
             }
         };
-    }, []);
+    }, [timezone]);
 
     // -------------------------------------------------------------------------
     // 2. Data & Symbol/Timeframe Logic
