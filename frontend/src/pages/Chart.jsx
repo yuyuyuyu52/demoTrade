@@ -2126,7 +2126,7 @@ export default function Chart({
                     };
 
                     if (candle.open > 0 && seriesRef.current) {
-                        newSeries.update(candle);
+                        seriesRef.current.update(candle);
 
                         // Update buffer
                         const lastData = allDataRef.current[allDataRef.current.length - 1];
