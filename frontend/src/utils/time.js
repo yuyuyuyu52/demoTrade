@@ -60,6 +60,9 @@ export const getTzOffsetSeconds = (ms, timeZone) => {
 // Convert UTC ms timestamp to chart seconds shifted to a specific timezone
 export const toChartSeconds = (ms, timeZone) => Math.floor(ms / 1000 + getTzOffsetSeconds(ms, timeZone));
 
+// Legacy helper (uses default TIMEZONE constant) - kept for backward compatibility
+export const toNySeconds = (ms) => toChartSeconds(ms, TIMEZONE);
+
 // Convert Chart seconds (shifted) back to UTC seconds
 export const toUTCSeconds = (chartSeconds, timeZone) => {
     // 1. Initial guess: assuming chartSeconds is close to UTC
