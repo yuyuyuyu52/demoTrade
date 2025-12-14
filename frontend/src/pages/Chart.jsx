@@ -23,7 +23,20 @@ export default function Chart({
     showSettingsTimestamp = 0,
     // Callbacks
     onPriceChange = () => { },
-    onToolChange = () => { }
+    onToolChange = () => { },
+
+    // Shared Settings (Controlled from Parent)
+    timezone = TIMEZONE,
+    showFVG = false,
+    chartOptions = {
+        upColor: '#00C853',
+        downColor: '#FF5252',
+        wickUpColor: '#00C853',
+        wickDownColor: '#FF5252',
+        borderVisible: false,
+        borderColor: '#000000',
+    },
+    onSettingsChange = () => { }
 }) {
     const { user } = useAuth();
     const chartContainerRef = useRef();
@@ -105,19 +118,9 @@ export default function Chart({
     }, [showSettingsTimestamp]);
 
     // Chart Settings
-
-    const [showFVG, setShowFVG] = useState(false);
-    const showFVGRef = useRef(false); // Ref to track latest showFVG for use inside closures
+    // Props are used directly: showFVG, timezone, chartOptions
+    const showFVGRef = useRef(showFVG); // Init with prop
     const isChartReadyRef = useRef(false); // Track if initial data is loaded
-    const [timezone, setTimezone] = useState(TIMEZONE);
-    const [chartOptions, setChartOptions] = useState({
-        upColor: '#00C853',
-        downColor: '#FF5252',
-        wickUpColor: '#00C853',
-        wickDownColor: '#FF5252',
-        borderVisible: false,
-        borderColor: '#000000',
-    });
 
     const [error, setError] = useState(null);
     const [draggingLine, setDraggingLine] = useState(null);
@@ -217,65 +220,8 @@ export default function Chart({
         return fvgs;
     }, []);
 
-    // Fetch Settings from Backend
-    useEffect(() => {
-        if (!user) return;
-        const fetchSettings = async () => {
-            try {
-                const res = await fetch(`/api/accounts/${user.id}`);
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data.chart_settings) {
-                        const s = data.chart_settings;
-                        if (s.showFVG !== undefined) {
-                            setShowFVG(s.showFVG);
-                            showFVGRef.current = s.showFVG; // Update ref immediately
-                            // Force update if data is already loaded
-                            if (allDataRef.current.length > 0 && fvgPrimitiveRef.current) {
-                                if (s.showFVG) {
-                                    const fvgs = calculateFVGs(allDataRef.current);
-                                    fvgPrimitiveRef.current.setFVGs(fvgs);
-                                } else {
-                                    fvgPrimitiveRef.current.setFVGs([]);
-                                }
-                            }
-                        }
-                        if (s.timezone) setTimezone(s.timezone);
-                        if (s.chartOptions) setChartOptions(prev => ({ ...prev, ...s.chartOptions }));
-                    }
-                }
-            } catch (e) {
-                console.error("Failed to fetch settings", e);
-            }
-        };
-        fetchSettings();
-    }, [user, calculateFVGs]); // Added calculateFVGs dependency
-
-    // Save Settings to Backend (Debounced)
-    useEffect(() => {
-        if (!user) return;
-        const settings = {
-            showFVG,
-            timezone,
-            chartOptions
-        };
-
-        const timer = setTimeout(async () => {
-            try {
-                await fetch(`/api/accounts/${user.id}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        chart_settings: settings
-                    })
-                });
-            } catch (e) {
-                console.error("Failed to save settings", e);
-            }
-        }, 1000);
-
-        return () => clearTimeout(timer);
-    }, [showFVG, chartOptions, timezone, user]);
+    // Fetching and Saving Settings is now handled by Parent (MultiChart)
+    // Removed local fetch/save effects.
 
     // Sync showFVG to ref
     useEffect(() => {
@@ -2344,7 +2290,7 @@ export default function Chart({
                             <label className="block text-xs font-semibold text-gray-500 mb-1">Timezone</label>
                             <select
                                 value={timezone}
-                                onChange={(e) => setTimezone(e.target.value)}
+                                onChange={(e) => onSettingsChange({ timezone: e.target.value })}
                                 className="w-full text-sm border-gray-300 rounded shadow-sm focus:border-blue-500 focus:ring-blue-500"
                             >
                                 <option value="Asia/Shanghai">Beijing (UTC+8)</option>
@@ -2357,7 +2303,7 @@ export default function Chart({
                             <input
                                 type="checkbox"
                                 checked={showFVG}
-                                onChange={(e) => setShowFVG(e.target.checked)}
+                                onChange={(e) => onSettingsChange({ showFVG: e.target.checked })}
                                 className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
                             />
                         </div>
@@ -2367,29 +2313,29 @@ export default function Chart({
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
                                     <label className="block text-xs text-gray-500 mb-1">Up</label>
-                                    <input type="color" value={chartOptions.upColor} onChange={(e) => setChartOptions({ ...chartOptions, upColor: e.target.value })} className="w-full h-8 p-0 border rounded cursor-pointer" />
+                                    <input type="color" value={chartOptions.upColor} onChange={(e) => onSettingsChange({ chartOptions: { upColor: e.target.value } })} className="w-full h-8 p-0 border rounded cursor-pointer" />
                                 </div>
                                 <div>
                                     <label className="block text-xs text-gray-500 mb-1">Down</label>
-                                    <input type="color" value={chartOptions.downColor} onChange={(e) => setChartOptions({ ...chartOptions, downColor: e.target.value })} className="w-full h-8 p-0 border rounded cursor-pointer" />
+                                    <input type="color" value={chartOptions.downColor} onChange={(e) => onSettingsChange({ chartOptions: { downColor: e.target.value } })} className="w-full h-8 p-0 border rounded cursor-pointer" />
                                 </div>
                                 <div>
                                     <label className="block text-xs text-gray-500 mb-1">Wick Up</label>
-                                    <input type="color" value={chartOptions.wickUpColor} onChange={(e) => setChartOptions({ ...chartOptions, wickUpColor: e.target.value })} className="w-full h-8 p-0 border rounded cursor-pointer" />
+                                    <input type="color" value={chartOptions.wickUpColor} onChange={(e) => onSettingsChange({ chartOptions: { wickUpColor: e.target.value } })} className="w-full h-8 p-0 border rounded cursor-pointer" />
                                 </div>
                                 <div>
                                     <label className="block text-xs text-gray-500 mb-1">Wick Down</label>
-                                    <input type="color" value={chartOptions.wickDownColor} onChange={(e) => setChartOptions({ ...chartOptions, wickDownColor: e.target.value })} className="w-full h-8 p-0 border rounded cursor-pointer" />
+                                    <input type="color" value={chartOptions.wickDownColor} onChange={(e) => onSettingsChange({ chartOptions: { wickDownColor: e.target.value } })} className="w-full h-8 p-0 border rounded cursor-pointer" />
                                 </div>
                                 <div>
                                     <label className="block text-xs text-gray-500 mb-1">Border</label>
-                                    <input type="color" value={chartOptions.borderColor} onChange={(e) => setChartOptions({ ...chartOptions, borderColor: e.target.value })} className="w-full h-8 p-0 border rounded cursor-pointer" />
+                                    <input type="color" value={chartOptions.borderColor} onChange={(e) => onSettingsChange({ chartOptions: { borderColor: e.target.value } })} className="w-full h-8 p-0 border rounded cursor-pointer" />
                                 </div>
                                 <div className="col-span-2 flex items-center">
                                     <input
                                         type="checkbox"
                                         checked={chartOptions.borderVisible}
-                                        onChange={(e) => setChartOptions({ ...chartOptions, borderVisible: e.target.checked })}
+                                        onChange={(e) => onSettingsChange({ chartOptions: { borderVisible: e.target.checked } })}
                                         className="h-4 w-4 text-blue-600 rounded mr-2"
                                     />
                                     <label className="text-xs text-gray-500">Border Visible</label>

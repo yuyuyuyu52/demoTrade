@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Chart from './Chart';
 import { LayoutGrid, Square, Columns, Rows, Trash2, Settings, MousePointer2, Pencil, TrendingUp, ArrowUpCircle, ArrowDownCircle } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 export default function MultiChart() {
+    const { user } = useAuth();
     // Layout modes: '1x1', '2x1' (2 vertical cols), '1x2' (2 horizontal rows), '2x2'
     const [layout, setLayout] = useState(() => localStorage.getItem('multiChartLayout') || '1x1');
     const [activeChartId, setActiveChartId] = useState(0);
@@ -15,6 +17,75 @@ export default function MultiChart() {
     // Real-time data from active chart (for toolbar display)
     const [activePrice, setActivePrice] = useState(null);
     const [activePriceColor, setActivePriceColor] = useState('text-gray-800');
+
+    // Global Chart Settings (Shared by all charts)
+    const [globalSettings, setGlobalSettings] = useState({
+        timezone: 'Asia/Shanghai',
+        showFVG: false,
+        chartOptions: {
+            upColor: '#00C853',
+            downColor: '#FF5252',
+            wickUpColor: '#00C853',
+            wickDownColor: '#FF5252',
+            borderVisible: false,
+            borderColor: '#000000',
+        }
+    });
+
+    // Fetch Global Settings
+    useEffect(() => {
+        if (!user) return;
+        const fetchSettings = async () => {
+            try {
+                const res = await fetch(`/api/accounts/${user.id}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.chart_settings) {
+                        const s = data.chart_settings;
+                        setGlobalSettings(prev => ({
+                            timezone: s.timezone || prev.timezone,
+                            showFVG: s.showFVG !== undefined ? s.showFVG : prev.showFVG,
+                            chartOptions: { ...prev.chartOptions, ...s.chartOptions }
+                        }));
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to fetch settings", e);
+            }
+        };
+        fetchSettings();
+    }, [user]);
+
+    // Save Global Settings (Debounced)
+    useEffect(() => {
+        if (!user) return;
+        const timer = setTimeout(async () => {
+            try {
+                await fetch(`/api/accounts/${user.id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chart_settings: globalSettings
+                    })
+                });
+            } catch (e) {
+                console.error("Failed to save settings", e);
+            }
+        }, 1000);
+        return () => clearTimeout(timer);
+    }, [globalSettings, user]);
+
+    // Handler for updating settings from any chart
+    const updateGlobalSettings = useCallback((updates) => {
+        setGlobalSettings(prev => {
+            // updates can be partial { timezone: ... } or { chartOptions: ... }
+            const newSettings = { ...prev, ...updates };
+            if (updates.chartOptions) {
+                newSettings.chartOptions = { ...prev.chartOptions, ...updates.chartOptions };
+            }
+            return newSettings;
+        });
+    }, []);
 
     // Initialize or get chart data
     const getChartData = (id) => {
@@ -224,6 +295,12 @@ export default function MultiChart() {
                                     }
                                 }}
                                 onToolChange={(tool) => updateChartData(id, { activeTool: tool })}
+
+                                // Shared Settings Props
+                                timezone={globalSettings.timezone}
+                                showFVG={globalSettings.showFVG}
+                                chartOptions={globalSettings.chartOptions}
+                                onSettingsChange={updateGlobalSettings}
                             />
                         </div>
                     );
