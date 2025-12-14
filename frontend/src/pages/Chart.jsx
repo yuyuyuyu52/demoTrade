@@ -2204,6 +2204,10 @@ export default function Chart({
             ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
+                if (isCancelled) {
+                    ws.close();
+                    return;
+                }
                 console.log("Connected to Account Stream");
             };
 
@@ -2212,20 +2216,23 @@ export default function Chart({
                 try {
                     const msg = JSON.parse(event.data);
                     if (msg.type === 'ACCOUNT_UPDATE') {
-                        console.log("Received ACCOUNT_UPDATE, refreshing data...");
+                        // console.log("Received ACCOUNT_UPDATE, refreshing data...");
                         updateOverlayData();
                     }
                 } catch (e) {
-                    console.error("Account WS Decode Error", e);
+                    // console.error("Account WS Decode Error", e);
                 }
             };
 
             ws.onerror = (e) => {
+                if (isCancelled) return;
                 console.error("Account WS Error", e);
             };
 
             ws.onclose = () => {
-                console.log("Account Stream Closed");
+                if (!isCancelled) {
+                    console.log("Account Stream Closed");
+                }
             };
         };
 
@@ -2233,7 +2240,14 @@ export default function Chart({
 
         return () => {
             isCancelled = true;
-            if (ws) ws.close();
+            if (ws) {
+                // Remove listeners to prevent "closed before established" errors from triggering user handlers
+                ws.onopen = null;
+                ws.onmessage = null;
+                ws.onerror = null;
+                ws.onclose = null;
+                ws.close();
+            }
         };
     }, [user, updateOverlayData]);
 
