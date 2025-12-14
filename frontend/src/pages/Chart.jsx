@@ -756,6 +756,8 @@ export default function Chart({
                             }
                         }
                         updateOverlayData();
+                        // Retry update after a delay to catch backend processing lag
+                        setTimeout(() => updateOverlayData(), 1000);
                     } catch (err) {
                         console.error("Failed to action", err);
                         setNotification({ text: "Action failed", type: 'error' });
@@ -781,177 +783,179 @@ export default function Chart({
         if (!user || (draggingLineRef.current)) return; // Don't update if dragging
 
         try {
-            // 1. Fetch Account (Positions)
-            const accRes = await fetch(`/api/accounts/${user.id}`);
+            // Fetch both Account (Positions) and Orders in parallel to minimize waiting time
+            const [accRes, ordersRes] = await Promise.all([
+                fetch(`/api/accounts/${user.id}`),
+                fetch(`/api/orders/?account_id=${user.id}`)
+            ]);
+
+            let accData = null;
+            let ordersData = null;
+
             if (accRes.ok) {
-                const accData = await accRes.json();
-
-                // Check if chart is still mounted/valid
-                if (!seriesRef.current) return;
-
-                // Clear existing lines before adding new ones
-                clearPriceLines();
-
-                // Add Position Lines
-                if (accData.positions && Array.isArray(accData.positions)) {
-                    accData.positions.forEach(pos => {
-                        if (pos.symbol === symbol) {
-                            // Entry Price
-                            let pnlHtml = '';
-                            if (pos.unrealized_pnl) {
-                                const pnl = parseFloat(pos.unrealized_pnl);
-                                const pnlColor = pnl >= 0 ? '#00E676' : '#FF5252'; // Green or Red
-                                const sign = pnl >= 0 ? '+' : '';
-                                pnlHtml = ` <span style="color: ${pnlColor}; font-weight: bold;">${sign}${pnl.toFixed(2)}</span>`;
-                            }
-
-                            addPriceLine(pos.entry_price, `Pos ${pos.quantity}${pnlHtml}`, '#2962FF', LineStyle.Solid, {
-                                type: 'POS',
-                                positionId: pos.id,
-                                quantity: parseFloat(pos.quantity)
-                            });
-
-                            // SL/TP
-                            if (pos.stop_loss_price) {
-                                const slPrice = parseFloat(pos.stop_loss_price);
-                                const qty = parseFloat(pos.quantity);
-                                const entry = parseFloat(pos.entry_price);
-                                const pnl = (slPrice - entry) * qty;
-                                const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`;
-
-                                addPriceLine(pos.stop_loss_price, `SL ${pnlStr}`, '#ef5350', LineStyle.Solid, { type: 'SL', positionId: pos.id });
-                            }
-                            if (pos.take_profit_price) {
-                                const tpPrice = parseFloat(pos.take_profit_price);
-                                const qty = parseFloat(pos.quantity);
-                                const entry = parseFloat(pos.entry_price);
-                                const pnl = (tpPrice - entry) * qty;
-                                const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`;
-
-                                addPriceLine(pos.take_profit_price, `TP ${pnlStr}`, '#26a69a', LineStyle.Solid, { type: 'TP', positionId: pos.id });
-                            }
-                        }
-                    });
-                }
+                accData = await accRes.json();
+            }
+            if (ordersRes.ok) {
+                ordersData = await ordersRes.json();
             }
 
-            // 2. Fetch Open Orders
-            const ordersRes = await fetch(`/api/orders/?account_id=${user.id}`);
-            if (ordersRes.ok) {
-                const ordersData = await ordersRes.json();
+            // Check if chart is still mounted/valid
+            if (!seriesRef.current) return;
 
-                // Check if chart is still mounted/valid
-                if (!seriesRef.current) return;
+            // Clear existing lines ONCE, right before we are ready to add new ones
+            clearPriceLines();
 
-                if (Array.isArray(ordersData)) {
-                    ordersData.forEach(order => {
-                        if (order.symbol === symbol && order.status === 'NEW') {
-                            // Limit Order Price
-                            if (order.limit_price) {
-                                addPriceLine(order.limit_price, `${order.side} ${order.quantity}`, '#FF9800', LineStyle.Solid, { type: 'ORDER', orderId: order.id });
-
-                                // Limit Order TP/SL Lines
-                                if (order.take_profit_price) {
-                                    const tp = parseFloat(order.take_profit_price);
-                                    const entry = parseFloat(order.limit_price);
-                                    const qty = parseFloat(order.quantity);
-                                    const isBuy = order.side === 'BUY';
-                                    const pnl = (tp - entry) * qty * (isBuy ? 1 : -1);
-                                    const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`;
-
-                                    addPriceLine(tp, `TP (Order) ${pnlStr}`, '#26a69a', LineStyle.Dashed, {
-                                        type: 'ORDER_TP',
-                                        orderId: order.id
-                                    });
-                                }
-
-                                if (order.stop_loss_price) {
-                                    const sl = parseFloat(order.stop_loss_price);
-                                    const entry = parseFloat(order.limit_price);
-                                    const qty = parseFloat(order.quantity);
-                                    const isBuy = order.side === 'BUY';
-                                    const pnl = (sl - entry) * qty * (isBuy ? 1 : -1);
-                                    const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`;
-
-                                    addPriceLine(sl, `SL (Order) ${pnlStr}`, '#ef5350', LineStyle.Dashed, {
-                                        type: 'ORDER_SL',
-                                        orderId: order.id
-                                    });
-                                }
-                            }
+            // 1. Process Positions
+            if (accData && accData.positions && Array.isArray(accData.positions)) {
+                accData.positions.forEach(pos => {
+                    if (pos.symbol === symbol) {
+                        // Entry Price
+                        let pnlHtml = '';
+                        if (pos.unrealized_pnl) {
+                            const pnl = parseFloat(pos.unrealized_pnl);
+                            const pnlColor = pnl >= 0 ? '#00E676' : '#FF5252'; // Green or Red
+                            const sign = pnl >= 0 ? '+' : '';
+                            pnlHtml = ` <span style="color: ${pnlColor}; font-weight: bold;">${sign}${pnl.toFixed(2)}</span>`;
                         }
-                    });
 
-                    // Add Markers for Filled Orders (History)
-                    const rawMarkers = ordersData
-                        .filter(o => o.symbol === symbol && o.status === 'FILLED')
-                        .map(o => {
-                            // Use updated_at for FILLED orders
-                            const originalTime = toNySeconds(new Date(o.updated_at).getTime());
-                            const interval = timeframeToSeconds(timeframe);
-                            // Normalize time to the start of the candle
-                            const normalizedTime = Math.floor(originalTime / interval) * interval;
-                            return {
-                                ...o,
-                                normalizedTime,
-                                originalPrice: parseFloat(o.price)
-                            };
+                        addPriceLine(pos.entry_price, `Pos ${pos.quantity}${pnlHtml}`, '#2962FF', LineStyle.Solid, {
+                            type: 'POS',
+                            positionId: pos.id,
+                            quantity: parseFloat(pos.quantity)
                         });
 
-                    // Aggregate markers by Time and Side
-                    const aggregatedMarkersMap = new Map();
+                        // SL/TP
+                        if (pos.stop_loss_price) {
+                            const slPrice = parseFloat(pos.stop_loss_price);
+                            const qty = parseFloat(pos.quantity);
+                            const entry = parseFloat(pos.entry_price);
+                            const pnl = (slPrice - entry) * qty;
+                            const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`;
 
-                    rawMarkers.forEach(o => {
-                        const key = `${o.normalizedTime}_${o.side}`;
-                        if (!aggregatedMarkersMap.has(key)) {
-                            aggregatedMarkersMap.set(key, {
-                                time: o.normalizedTime,
-                                side: o.side,
-                                quantitySum: 0, // Use integer math or high precision if possible, but simplest is multiplied
-                                prices: [],
-                                count: 0,
-                                id: o.id // Use first ID as representative
-                            });
+                            addPriceLine(pos.stop_loss_price, `SL ${pnlStr}`, '#ef5350', LineStyle.Solid, { type: 'SL', positionId: pos.id });
                         }
-                        const entry = aggregatedMarkersMap.get(key);
-                        // Add with multiplier to avoid float dust
-                        // Assuming max 8 decimals for crypto
-                        const qty = parseFloat(o.quantity);
-                        entry.quantitySum += Math.round(qty * 100000000);
-                        entry.prices.push(o.originalPrice);
-                        entry.count += 1;
-                    });
+                        if (pos.take_profit_price) {
+                            const tpPrice = parseFloat(pos.take_profit_price);
+                            const qty = parseFloat(pos.quantity);
+                            const entry = parseFloat(pos.entry_price);
+                            const pnl = (tpPrice - entry) * qty;
+                            const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`;
 
-                    const markers = Array.from(aggregatedMarkersMap.values()).map(m => {
-                        const avgPrice = m.prices.reduce((a, b) => a + b, 0) / m.count;
-                        // Restore aggregated quantity
-                        const totalQty = m.quantitySum / 100000000;
+                            addPriceLine(pos.take_profit_price, `TP ${pnlStr}`, '#26a69a', LineStyle.Solid, { type: 'TP', positionId: pos.id });
+                        }
+                    }
+                });
+            }
 
+            // 2. Process Orders
+            if (ordersData && Array.isArray(ordersData)) {
+                ordersData.forEach(order => {
+                    if (order.symbol === symbol && order.status === 'NEW') {
+                        // Limit Order Price
+                        if (order.limit_price) {
+                            addPriceLine(order.limit_price, `${order.side} ${order.quantity}`, '#FF9800', LineStyle.Solid, { type: 'ORDER', orderId: order.id });
+
+                            // Limit Order TP/SL Lines
+                            if (order.take_profit_price) {
+                                const tp = parseFloat(order.take_profit_price);
+                                const entry = parseFloat(order.limit_price);
+                                const qty = parseFloat(order.quantity);
+                                const isBuy = order.side === 'BUY';
+                                const pnl = (tp - entry) * qty * (isBuy ? 1 : -1);
+                                const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`;
+
+                                addPriceLine(tp, `TP (Order) ${pnlStr}`, '#26a69a', LineStyle.Dashed, {
+                                    type: 'ORDER_TP',
+                                    orderId: order.id
+                                });
+                            }
+
+                            if (order.stop_loss_price) {
+                                const sl = parseFloat(order.stop_loss_price);
+                                const entry = parseFloat(order.limit_price);
+                                const qty = parseFloat(order.quantity);
+                                const isBuy = order.side === 'BUY';
+                                const pnl = (sl - entry) * qty * (isBuy ? 1 : -1);
+                                const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`;
+
+                                addPriceLine(sl, `SL (Order) ${pnlStr}`, '#ef5350', LineStyle.Dashed, {
+                                    type: 'ORDER_SL',
+                                    orderId: order.id
+                                });
+                            }
+                        }
+                    }
+                });
+
+                // Add Markers for Filled Orders (History)
+                const rawMarkers = ordersData
+                    .filter(o => o.symbol === symbol && o.status === 'FILLED')
+                    .map(o => {
+                        // Use updated_at for FILLED orders
+                        const originalTime = toNySeconds(new Date(o.updated_at).getTime());
+                        const interval = timeframeToSeconds(timeframe);
+                        // Normalize time to the start of the candle
+                        const normalizedTime = Math.floor(originalTime / interval) * interval;
                         return {
-                            time: m.time,
-                            position: m.side === 'BUY' ? 'belowBar' : 'aboveBar',
-                            color: m.side === 'BUY' ? '#2196F3' : '#E91E63',
-                            shape: m.side === 'BUY' ? 'arrowUp' : 'arrowDown',
-                            text: '', // Text handled by price line on click
-                            originalPrice: avgPrice,
-                            side: m.side,
-                            quantity: totalQty, // Clean number
-                            id: m.id
+                            ...o,
+                            normalizedTime,
+                            originalPrice: parseFloat(o.price)
                         };
                     });
 
-                    // Store markers in ref for click detection
-                    filledOrdersRef.current = markers;
+                // Aggregate markers by Time and Side
+                const aggregatedMarkersMap = new Map();
 
-                    // Sort markers by time
-                    markers.sort((a, b) => a.time - b.time);
+                rawMarkers.forEach(o => {
+                    const key = `${o.normalizedTime}_${o.side}`;
+                    if (!aggregatedMarkersMap.has(key)) {
+                        aggregatedMarkersMap.set(key, {
+                            time: o.normalizedTime,
+                            side: o.side,
+                            quantitySum: 0, // Use integer math or high precision if possible, but simplest is multiplied
+                            prices: [],
+                            count: 0,
+                            id: o.id // Use first ID as representative
+                        });
+                    }
+                    const entry = aggregatedMarkersMap.get(key);
+                    // Add with multiplier to avoid float dust
+                    // Assuming max 8 decimals for crypto
+                    const qty = parseFloat(o.quantity);
+                    entry.quantitySum += Math.round(qty * 100000000);
+                    entry.prices.push(o.originalPrice);
+                    entry.count += 1;
+                });
 
-                    if (seriesRef.current) {
-                        if (!markersPrimitiveRef.current) {
-                            markersPrimitiveRef.current = createSeriesMarkers(seriesRef.current, markers);
-                        } else {
-                            markersPrimitiveRef.current.setMarkers(markers);
-                        }
+                const markers = Array.from(aggregatedMarkersMap.values()).map(m => {
+                    const avgPrice = m.prices.reduce((a, b) => a + b, 0) / m.count;
+                    // Restore aggregated quantity
+                    const totalQty = m.quantitySum / 100000000;
+
+                    return {
+                        time: m.time,
+                        position: m.side === 'BUY' ? 'belowBar' : 'aboveBar',
+                        color: m.side === 'BUY' ? '#2196F3' : '#E91E63',
+                        shape: m.side === 'BUY' ? 'arrowUp' : 'arrowDown',
+                        text: '', // Text handled by price line on click
+                        originalPrice: avgPrice,
+                        side: m.side,
+                        quantity: totalQty, // Clean number
+                        id: m.id
+                    };
+                });
+
+                // Store markers in ref for click detection
+                filledOrdersRef.current = markers;
+
+                // Sort markers by time
+                markers.sort((a, b) => a.time - b.time);
+
+                if (seriesRef.current) {
+                    if (!markersPrimitiveRef.current) {
+                        markersPrimitiveRef.current = createSeriesMarkers(seriesRef.current, markers);
+                    } else {
+                        markersPrimitiveRef.current.setMarkers(markers);
                     }
                 }
             }
@@ -1029,6 +1033,7 @@ export default function Chart({
                     console.log(`${type} ${side} order placed successfully`);
                     setNotification({ text: `${side} Order Placed`, type: 'success' });
                     updateOverlayData(); // Refresh lines
+                    setTimeout(() => updateOverlayData(), 500);
                 } else {
                     const err = await res.json();
                     setNotification({ text: `Order failed: ${err.detail}`, type: 'error' });
@@ -1791,6 +1796,7 @@ export default function Chart({
                 }
                 // Refresh data
                 updateOverlayData();
+                setTimeout(() => updateOverlayData(), 500);
             }
         };
 
@@ -2178,6 +2184,58 @@ export default function Chart({
             }
         };
     }, [symbol, timeframe, user, updateOverlayData, updateFVGs]); // Re-run if user changes
+
+    // -------------------------------------------------------------------------
+    // 3. Account WebSocket (User Data Stream)
+    // -------------------------------------------------------------------------
+    useEffect(() => {
+        if (!user) return;
+
+        let ws = null;
+        let isCancelled = false;
+
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        const wsUrl = `${protocol}//${host}/api/accounts/ws/${user.id}`;
+
+        console.log(`Connecting to Account WS: ${wsUrl}`);
+
+        const connect = () => {
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log("Connected to Account Stream");
+            };
+
+            ws.onmessage = (event) => {
+                if (isCancelled) return;
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'ACCOUNT_UPDATE') {
+                        console.log("Received ACCOUNT_UPDATE, refreshing data...");
+                        updateOverlayData();
+                    }
+                } catch (e) {
+                    console.error("Account WS Decode Error", e);
+                }
+            };
+
+            ws.onerror = (e) => {
+                console.error("Account WS Error", e);
+            };
+
+            ws.onclose = () => {
+                console.log("Account Stream Closed");
+            };
+        };
+
+        connect();
+
+        return () => {
+            isCancelled = true;
+            if (ws) ws.close();
+        };
+    }, [user, updateOverlayData]);
 
     return (
         <div

@@ -5,6 +5,7 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models import Position
 from app.schemas import PositionResponse, PositionUpdate
+from app.services.websocket_manager import manager
 
 router = APIRouter(prefix="/positions", tags=["positions"])
 
@@ -36,4 +37,8 @@ async def update_position(position_id: int, position_in: PositionUpdate, db: Asy
 
     await db.commit()
     await db.refresh(position)
+    
+    # Notify
+    await manager.send_personal_message({"type": "ACCOUNT_UPDATE"}, position.account_id)
+    
     return position

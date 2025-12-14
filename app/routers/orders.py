@@ -6,6 +6,7 @@ from typing import List
 from app.database import get_db
 from app.models import Order, Account, OrderType, OrderStatus
 from app.schemas import OrderCreate, OrderResponse, OrderUpdate
+from app.services.websocket_manager import manager
 
 
 router = APIRouter(prefix="/orders", tags=["orders"])
@@ -35,6 +36,9 @@ async def create_order(order_in: OrderCreate, db: AsyncSession = Depends(get_db)
     await db.commit()
     await db.refresh(new_order)
 
+    # Notify
+    await manager.send_personal_message({"type": "ACCOUNT_UPDATE"}, order_in.account_id)
+
     # If Market Order, the matching engine will pick it up automatically
     # We do NOT execute it here to avoid race conditions and double execution
     # if the background task picks it up at the same time.
@@ -60,6 +64,10 @@ async def cancel_order(order_id: int, db: AsyncSession = Depends(get_db)):
     order.status = OrderStatus.CANCELED
     await db.commit()
     await db.refresh(order)
+    
+    # Notify
+    await manager.send_personal_message({"type": "ACCOUNT_UPDATE"}, order.account_id)
+    
     return order
 
 @router.patch("/{order_id}", response_model=OrderResponse)
@@ -92,4 +100,8 @@ async def update_order(order_id: int, order_update: OrderUpdate, db: AsyncSessio
 
     await db.commit()
     await db.refresh(order)
+    
+    # Notify
+    await manager.send_personal_message({"type": "ACCOUNT_UPDATE"}, order.account_id)
+    
     return order

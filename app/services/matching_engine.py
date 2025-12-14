@@ -7,8 +7,10 @@ from app.models import Order, OrderType, OrderSide, OrderStatus, Trade, Account,
 from app.services.binance_ws import get_current_price
 from app.database import AsyncSessionLocal
 from app.config import settings
+from app.services.websocket_manager import manager
 
 logger = logging.getLogger(__name__)
+
 
 class MatchingEngine:
     def __init__(self):
@@ -115,6 +117,10 @@ class MatchingEngine:
         )
         
         await session.commit()
+        
+        # Notify Client via WebSocket
+        await manager.send_personal_message({"type": "ACCOUNT_UPDATE"}, order.account_id)
+        
         logger.info(f"Executed trade for Order {order.id}: {order.side} {fill_qty} {order.symbol} @ {price} Fee: {fee}")
 
     async def update_account_and_position(self, session: AsyncSession, account_id: int, symbol: str, side: OrderSide, price: float, quantity: float, leverage: int = 1, fee: float = 0.0, take_profit_price: float = None, stop_loss_price: float = None):

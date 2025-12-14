@@ -382,3 +382,19 @@ async def calculate_account_metrics(account: Account) -> Account:
     account.unrealized_pnl = total_unrealized_pnl
     account.equity = account.balance + total_margin_used + total_unrealized_pnl
     return account
+
+from fastapi import WebSocket, WebSocketDisconnect
+from app.services.websocket_manager import manager
+
+@router.websocket("/ws/{account_id}")
+async def websocket_account_endpoint(websocket: WebSocket, account_id: int):
+    await manager.connect(websocket, account_id)
+    try:
+        while True:
+            # Keep connection alive and handle incoming (if any, e.g. ping)
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, account_id)
+    except Exception as e:
+        print(f"WS Exception on account {account_id}: {e}")
+        manager.disconnect(websocket, account_id)
