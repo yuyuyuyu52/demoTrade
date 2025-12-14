@@ -109,6 +109,7 @@ export default function Chart({
     const [showFVG, setShowFVG] = useState(false);
     const showFVGRef = useRef(false); // Ref to track latest showFVG for use inside closures
     const isChartReadyRef = useRef(false); // Track if initial data is loaded
+    const [timezone, setTimezone] = useState(TIMEZONE);
     const [chartOptions, setChartOptions] = useState({
         upColor: '#00C853',
         downColor: '#FF5252',
@@ -130,7 +131,7 @@ export default function Chart({
         onPriceChange(currentPrice, priceColor);
     }, [currentPrice, priceColor, onPriceChange]);
 
-    // Apply Chart Options
+    // Apply Chart Options (Colors)
     useEffect(() => {
         if (seriesRef.current) {
             seriesRef.current.applyOptions({
@@ -143,6 +144,18 @@ export default function Chart({
             });
         }
     }, [chartOptions]);
+
+    // Apply Timezone Change
+    useEffect(() => {
+        if (chartRef.current) {
+            chartRef.current.applyOptions({
+                localization: {
+                    timezone: timezone,
+                    dateFormat: 'yyyy-MM-dd',
+                },
+            });
+        }
+    }, [timezone]);
 
     // Fetch Settings from Backend
     // FVG Calculation
@@ -237,6 +250,7 @@ export default function Chart({
                                 }
                             }
                         }
+                        if (s.timezone) setTimezone(s.timezone);
                         if (s.chartOptions) setChartOptions(prev => ({ ...prev, ...s.chartOptions }));
                     }
                 }
@@ -252,6 +266,7 @@ export default function Chart({
         if (!user) return;
         const settings = {
             showFVG,
+            timezone,
             chartOptions
         };
 
@@ -270,7 +285,7 @@ export default function Chart({
         }, 1000);
 
         return () => clearTimeout(timer);
-    }, [showFVG, chartOptions, user]);
+    }, [showFVG, chartOptions, timezone, user]);
 
     // Sync showFVG to ref
     useEffect(() => {
@@ -2289,7 +2304,6 @@ export default function Chart({
                 </div>
             )}
 
-            {/* Floating Settings Panel (No Backdrop) */}
             {showSettings && (
                 <div
                     className="absolute top-2 right-2 z-40 bg-white p-4 rounded-lg shadow-2xl border border-gray-200 w-64 ring-1 ring-black ring-opacity-5"
@@ -2307,6 +2321,18 @@ export default function Chart({
                     </div>
 
                     <div className="space-y-4">
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-500 mb-1">Timezone</label>
+                            <select
+                                value={timezone}
+                                onChange={(e) => setTimezone(e.target.value)}
+                                className="w-full text-sm border-gray-300 rounded shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                            >
+                                <option value="Asia/Shanghai">Beijing (UTC+8)</option>
+                                <option value="America/New_York">New York (UTC-5)</option>
+                            </select>
+                        </div>
+
                         <div className="flex items-center justify-between">
                             <label className="text-sm font-medium text-gray-700">Show FVG</label>
                             <input
@@ -2353,13 +2379,16 @@ export default function Chart({
                         </div>
                     </div>
                 </div>
-            )}
+            )
+            }
 
-            {error && (
-                <div className="absolute top-2 left-2 right-2 p-2 bg-red-100 text-red-700 rounded z-20 text-xs text-center border border-red-200 shadow-sm">
-                    {error}
-                </div>
-            )}
+            {
+                error && (
+                    <div className="absolute top-2 left-2 right-2 p-2 bg-red-100 text-red-700 rounded z-20 text-xs text-center border border-red-200 shadow-sm">
+                        {error}
+                    </div>
+                )
+            }
 
             <div className="w-full h-full relative overflow-hidden">
                 <div
@@ -2368,6 +2397,6 @@ export default function Chart({
                 />
                 <div ref={labelsContainerRef} className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 10 }} />
             </div>
-        </div>
+        </div >
     );
 }

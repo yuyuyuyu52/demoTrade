@@ -1,4 +1,4 @@
-export const TIMEZONE = 'America/New_York';
+export const TIMEZONE = 'Asia/Shanghai';
 
 export const timeframeToSeconds = (tf) => {
     switch (tf) {
