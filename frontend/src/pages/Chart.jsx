@@ -41,6 +41,7 @@ export default function Chart({
     const allDataRef = useRef([]); // Store all loaded data
     const isLoadingRef = useRef(false);
     const hasMoreRef = useRef(true);
+    const lastViewStateRef = useRef(null); // Store visible range/zoom to restore on next load
 
     // Drawing Tools State (activeTool is prop)
     const [drawings, setDrawings] = useState([]);
@@ -1933,20 +1934,58 @@ export default function Chart({
                         seriesRef.current.setData(allDataRef.current);
                         // Ensure visible range is set correctly for initial load
                         if (!endTime) {
-                            // Fixed zoom level (prevent "too small" candles) and 1/4 right spacing
-                            const totalBars = allDataRef.current.length;
-                            // Total viewport capacity in bars - lower number means "larger" candles
-                            const visibleSlots = 120; 
-                            // Empty space on the right (1/4 of viewport)
-                            const rightOffset = Math.round(visibleSlots * 0.25);
-                            
-                            const logicalTo = (totalBars - 1) + rightOffset;
-                            const logicalFrom = logicalTo - visibleSlots;
+                            const restoreState = lastViewStateRef.current;
+                            let restored = false;
 
-                            chartRef.current.timeScale().setVisibleLogicalRange({
-                                from: logicalFrom,
-                                to: logicalTo
-                            });
+                            if (restoreState) {
+                                // Try to restore
+                                const timeScale = chartRef.current.timeScale();
+                                const totalBars = allDataRef.current.length;
+
+                                if (restoreState.shouldKeepRightOffset) {
+                                    // User was at the right edge or looking at latest data
+                                    // Preserve "Zoom Level" (slots) and keep right edge alignment
+                                    const visibleSlots = restoreState.visibleSlots;
+
+                                    // If user was "zoomed really small" (large slots), or "very large" (small slots)
+                                    // We keep that density.
+
+                                    // Calculate new Logical Range to align right
+                                    // Original logic: rightOffset = visibleSlots * 0.25
+                                    // If we just want to match 'visibleSlots', we can use setVisibleLogicalRange
+                                    // Assuming logical indices match (0 to N-1).
+
+                                    const logicalTo = (totalBars - 1) + (restoreState.rightOffset || Math.round(visibleSlots * 0.25));
+                                    const logicalFrom = logicalTo - visibleSlots;
+
+                                    timeScale.setVisibleLogicalRange({
+                                        from: logicalFrom,
+                                        to: logicalTo
+                                    });
+                                    restored = true;
+                                } else if (restoreState.visibleTimeRange) {
+                                    // User was looking at history
+                                    // Try to restore Time Range
+                                    timeScale.setVisibleRange(restoreState.visibleTimeRange);
+                                    // Note: if time range is invalid for new symbol/timeframe, this might default
+                                    restored = true;
+                                }
+                            }
+
+                            if (!restored) {
+                                // Default: 180 candles, 1/4 right spacing
+                                const totalBars = allDataRef.current.length;
+                                const visibleSlots = 180;
+                                const rightOffset = Math.round(visibleSlots * 0.25);
+
+                                const logicalTo = (totalBars - 1) + rightOffset;
+                                const logicalFrom = logicalTo - visibleSlots;
+
+                                chartRef.current.timeScale().setVisibleLogicalRange({
+                                    from: logicalFrom,
+                                    to: logicalTo
+                                });
+                            }
 
                             isChartReadyRef.current = true; // Mark chart as ready for WS updates
                         }
@@ -2148,6 +2187,35 @@ export default function Chart({
         syncLabels();
 
         return () => {
+            // Save state before destroy
+            if (chartRef.current && seriesRef.current && !isDisposed) {
+                try {
+                    const timeScale = chartRef.current.timeScale();
+                    const logicalRange = timeScale.getVisibleLogicalRange();
+                    if (logicalRange) {
+                        const barsCnt = allDataRef.current.length;
+                        // "At Edge" definition: showing the last bar or within small margin
+                        // Logic: if logicalRange.to is >= barsCnt - X
+                        const distFromRight = (barsCnt - 1) - logicalRange.to;
+                        // If distFromRight is negative, we are past the last bar (whitespace). 
+                        // If distFromRight is large positive, we are in history.
+                        const isAtEdge = distFromRight < 20; // 20 bars tolerance
+
+                        const visibleSlots = logicalRange.to - logicalRange.from;
+                        const visibleTimeRange = timeScale.getVisibleRange();
+
+                        lastViewStateRef.current = {
+                            shouldKeepRightOffset: isAtEdge,
+                            visibleSlots: visibleSlots,
+                            rightOffset: Math.max(0, Math.round(logicalRange.to - (barsCnt - 1))), // Capture actual whitespace used
+                            visibleTimeRange: visibleTimeRange
+                        };
+                    }
+                } catch (e) {
+                    console.error("Failed to save chart state", e);
+                }
+            }
+
             isDisposed = true; // Mark as disposed
             if (resizeObserver) resizeObserver.disconnect();
             cancelAnimationFrame(animationFrameId);
