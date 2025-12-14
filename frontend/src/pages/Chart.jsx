@@ -50,6 +50,7 @@ export default function Chart({
     const selectedDrawingIdRef = useRef(null); // Ref for selected ID
     const currentDrawingRef = useRef(null);
     const dragStateRef = useRef(null);
+    const isMagnetActiveRef = useRef(false);
     const filledOrdersRef = useRef([]); // Store filled orders for click interaction
 
     // Signal refs
@@ -1581,13 +1582,13 @@ export default function Chart({
                 if (hoverPrice !== null && hoverTime !== null) {
                     const magnet = getMagnetData(hoverTime, hoverPrice, true);
                     chartRef.current.setCrosshairPosition(magnet.price, magnet.time, seriesRef.current);
+                    isMagnetActiveRef.current = true;
                 }
             } else {
-                // If snap release, we might want to clear crosshair position overriding.
-                // However, lightweight-charts clearCrosshairPosition removes it.
-                // We want default behavior which tracks mouse.
-                // call clearCrosshairPosition() forces it to hide? No, it clears the FIXED position.
-                chartRef.current.clearCrosshairPosition();
+                if (isMagnetActiveRef.current) {
+                    chartRef.current.clearCrosshairPosition();
+                    isMagnetActiveRef.current = false;
+                }
             }
 
             // Drawing Dragging
