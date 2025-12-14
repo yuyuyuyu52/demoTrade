@@ -12,6 +12,15 @@ async def get_prices():
 
 from typing import Optional
 
+# Global session variable
+_client_session: Optional[aiohttp.ClientSession] = None
+
+async def get_client_session() -> aiohttp.ClientSession:
+    global _client_session
+    if _client_session is None or _client_session.closed:
+        _client_session = aiohttp.ClientSession()
+    return _client_session
+
 @router.get("/klines")
 async def get_klines(symbol: str, interval: str, limit: int = 1000, endTime: Optional[int] = None):
     # Use Binance Futures API
@@ -24,15 +33,19 @@ async def get_klines(symbol: str, interval: str, limit: int = 1000, endTime: Opt
     if endTime:
         params["endTime"] = endTime
         
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(url, params=params) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise HTTPException(status_code=response.status, detail=f"Binance API Error: {error_text}")
-                return await response.json()
-        except Exception as e:
-             raise HTTPException(status_code=500, detail=str(e))
+    try:
+        session = await get_client_session()
+        async with session.get(url, params=params) as response:
+            if response.status != 200:
+                error_text = await response.text()
+                raise HTTPException(status_code=response.status, detail=f"Binance API Error: {error_text}")
+            return await response.json()
+    except Exception as e:
+            # If session is closed or other error, try creating a new one next time
+            global _client_session
+            if _client_session and _client_session.closed:
+                _client_session = None
+            raise HTTPException(status_code=500, detail=str(e))
 
 @router.websocket("/ws/klines/{symbol}/{interval}")
 async def websocket_endpoint(websocket: WebSocket, symbol: str, interval: str):

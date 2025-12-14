@@ -21,35 +21,7 @@ export const timeframeToSeconds = (tf) => {
     }
 };
 
-// Get timezone offset in seconds for a given timestamp (ms) and IANA zone
-export const getTzOffsetSeconds = (ms, timeZone = TIMEZONE) => {
-    const dtf = new Intl.DateTimeFormat('en-US', {
-        timeZone,
-        hour12: false,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-    });
+// Convert UTC ms timestamp to Unix seconds (UTC)
+// The chart library will handle the timezone display based on the 'localization.timezone' config.
+export const toNySeconds = (ms) => Math.floor(ms / 1000);
 
-    const parts = dtf.formatToParts(new Date(ms));
-    const filled = {};
-    for (const { type, value } of parts) {
-        filled[type] = value;
-    }
-    const asUTC = Date.UTC(
-        Number(filled.year),
-        Number(filled.month) - 1,
-        Number(filled.day),
-        Number(filled.hour),
-        Number(filled.minute),
-        Number(filled.second),
-    );
-
-    return (asUTC - ms) / 1000;
-};
-
-// Convert UTC ms timestamp to chart seconds shifted to TIMEZONE
-export const toNySeconds = (ms) => Math.round(ms / 1000 + getTzOffsetSeconds(ms, TIMEZONE));
