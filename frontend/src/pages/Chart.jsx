@@ -1933,7 +1933,21 @@ export default function Chart({
                         seriesRef.current.setData(allDataRef.current);
                         // Ensure visible range is set correctly for initial load
                         if (!endTime) {
-                            chartRef.current.timeScale().fitContent();
+                            // Fixed zoom level (prevent "too small" candles) and 1/4 right spacing
+                            const totalBars = allDataRef.current.length;
+                            // Total viewport capacity in bars - lower number means "larger" candles
+                            const visibleSlots = 120; 
+                            // Empty space on the right (1/4 of viewport)
+                            const rightOffset = Math.round(visibleSlots * 0.25);
+                            
+                            const logicalTo = (totalBars - 1) + rightOffset;
+                            const logicalFrom = logicalTo - visibleSlots;
+
+                            chartRef.current.timeScale().setVisibleLogicalRange({
+                                from: logicalFrom,
+                                to: logicalTo
+                            });
+
                             isChartReadyRef.current = true; // Mark chart as ready for WS updates
                         }
                     }
