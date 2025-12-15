@@ -633,8 +633,12 @@ export default function Chart({
                     return btn;
                 };
 
-                labelElement.appendChild(createBtn('TP', 'TP'));
-                labelElement.appendChild(createBtn('SL', 'SL'));
+                if (!draggableInfo.hasTP) {
+                    labelElement.appendChild(createBtn('TP', 'TP'));
+                }
+                if (!draggableInfo.hasSL) {
+                    labelElement.appendChild(createBtn('SL', 'SL'));
+                }
             }
 
             // Add Title Text
@@ -790,7 +794,9 @@ export default function Chart({
                         addPriceLine(pos.entry_price, `Pos ${pos.quantity}${pnlHtml}`, '#2962FF', LineStyle.Solid, {
                             type: 'POS',
                             positionId: pos.id,
-                            quantity: parseFloat(pos.quantity)
+                            quantity: parseFloat(pos.quantity),
+                            hasTP: !!pos.take_profit_price,
+                            hasSL: !!pos.stop_loss_price
                         });
 
                         // SL/TP
@@ -822,7 +828,12 @@ export default function Chart({
                     if (order.symbol === symbol && order.status === 'NEW') {
                         // Limit Order Price
                         if (order.limit_price) {
-                            addPriceLine(order.limit_price, `${order.side} ${order.quantity}`, '#FF9800', LineStyle.Solid, { type: 'ORDER', orderId: order.id });
+                            addPriceLine(order.limit_price, `${order.side} ${order.quantity}`, '#FF9800', LineStyle.Solid, {
+                                type: 'ORDER',
+                                orderId: order.id,
+                                hasTP: !!order.take_profit_price,
+                                hasSL: !!order.stop_loss_price
+                            });
 
                             // Limit Order TP/SL Lines
                             if (order.take_profit_price) {
@@ -2299,6 +2310,14 @@ export default function Chart({
             {/* Active/Hover Border Overlay - pointer-events-none so it doesn't block clicks */}
             <div className={`absolute inset-0 pointer-events-none z-20 border-2 transition-colors duration-200 ${isActive ? 'border-blue-500' : 'border-transparent group-hover:border-gray-300'
                 }`} />
+
+            {/* Watermark / Info Label */}
+            <div className="absolute top-2 left-2 z-30 pointer-events-none select-none">
+                <div className="text-sm font-bold text-gray-500 opacity-60 flex gap-2">
+                    <span>{symbol}</span>
+                    <span>{timeframe}</span>
+                </div>
+            </div>
 
             {/* Notification Toast */}
             {notification && (
