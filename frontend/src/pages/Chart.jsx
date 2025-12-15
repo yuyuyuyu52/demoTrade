@@ -2105,16 +2105,17 @@ export default function Chart({
         loadData();
 
         // 2.4 WebSocket Setup
+        // 2.4 WebSocket Setup
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = window.location.host;
         const wsUrl = `${protocol}//${host}/api/market/ws/klines/${symbol}/${timeframe}`;
 
-        wsTimeout = setTimeout(() => {
+        const connect = () => {
             if (isCancelled) return;
             ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
-                console.log('Connected to WS');
+                console.log(`Connected to WS: ${symbol} ${timeframe}`);
             };
 
             ws.onmessage = (event) => {
@@ -2158,7 +2159,21 @@ export default function Chart({
                     console.error("WS Error", e);
                 }
             };
-        }, 500);
+
+            ws.onclose = () => {
+                if (!isCancelled) {
+                    console.warn(`WS Closed (${symbol}), reconnecting in 3s...`);
+                    wsTimeout = setTimeout(connect, 3000);
+                }
+            };
+
+            ws.onerror = (err) => {
+                console.error("WS Error:", err);
+                ws.close(); // Ensure close triggers reconnect
+            };
+        };
+
+        wsTimeout = setTimeout(connect, 500);
 
         // 2.5 Infinite Scroll Listener
         const handleVisibleRangeChange = (range) => {
