@@ -861,10 +861,16 @@ export default function Chart({
                     .filter(o => o.symbol === symbol && o.status === 'FILLED')
                     .map(o => {
                         // Use updated_at for FILLED orders
-                        const originalTime = toChartSeconds(new Date(o.updated_at).getTime(), timezone);
-                        const interval = timeframeToSeconds(timeframe);
-                        // Normalize time to the start of the candle
-                        const normalizedTime = Math.floor(originalTime / interval) * interval;
+                        const tradeTimeMs = new Date(o.updated_at).getTime();
+                        const intervalSeconds = timeframeToSeconds(timeframe);
+                        const intervalMs = intervalSeconds * 1000;
+
+                        // Normalize time to the start of the candle in UTC first
+                        const normalizedMs = Math.floor(tradeTimeMs / intervalMs) * intervalMs;
+
+                        // Then convert to Chart Seconds (shifted)
+                        const normalizedTime = toChartSeconds(normalizedMs, timezone);
+
                         return {
                             ...o,
                             normalizedTime,
@@ -932,7 +938,7 @@ export default function Chart({
         } catch (err) {
             console.error("Failed to fetch overlay data", err);
         }
-    }, [user, symbol, timeframe]);
+    }, [user, symbol, timeframe, timezone]);
 
     // Handle Delete Key for Drawings
     useEffect(() => {
@@ -1790,13 +1796,18 @@ export default function Chart({
         chartContainerRef.current.innerHTML = '';
 
         // Create Chart
+        const containerWidth = chartContainerRef.current.clientWidth;
+        const containerHeight = chartContainerRef.current.clientHeight;
+        const defaultBarSpacing = 6;
+        const rightOffset = Math.round((containerWidth / defaultBarSpacing) / 6); // 1/6 of screen width
+
         const chart = createChart(chartContainerRef.current, {
             layout: {
                 background: { type: ColorType.Solid, color: '#f5f5f5' },
                 textColor: 'black',
             },
-            width: chartContainerRef.current.clientWidth,
-            height: chartContainerRef.current.clientHeight,
+            width: containerWidth,
+            height: containerHeight,
             grid: {
                 vertLines: { visible: false },
                 horzLines: { visible: false },
@@ -1810,6 +1821,8 @@ export default function Chart({
             timeScale: {
                 timeVisible: true,
                 secondsVisible: false,
+                rightOffset: rightOffset,
+                barSpacing: defaultBarSpacing,
             },
             localization: {
                 locale: 'en-US',
