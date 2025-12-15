@@ -27,7 +27,7 @@ class MatchingEngine:
             except Exception as e:
                 logger.error(f"Error in matching engine loop: {e}")
             
-            await asyncio.sleep(1) # Check every second
+            await asyncio.sleep(0.1) # Check every 0.1 second
 
     def stop(self):
         self.running = False
