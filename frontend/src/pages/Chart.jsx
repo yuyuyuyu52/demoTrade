@@ -1834,12 +1834,13 @@ export default function Chart({
         chartRef.current = chart;
 
         const newSeries = chart.addSeries(CandlestickSeries, {
-            upColor: '#00C853',
-            downColor: '#000000',
-            borderVisible: true,
-            borderColor: '#000000',
-            wickUpColor: '#000000',
-            wickDownColor: '#000000',
+            upColor: chartOptions.upColor,
+            downColor: chartOptions.downColor,
+            borderVisible: chartOptions.borderVisible,
+            borderColor: chartOptions.borderColor,
+            wickUpColor: chartOptions.wickUpColor,
+            wickDownColor: chartOptions.wickDownColor,
+            lastValueVisible: false,
         });
 
         seriesRef.current = newSeries;
