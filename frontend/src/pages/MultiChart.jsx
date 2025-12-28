@@ -91,6 +91,7 @@ export default function MultiChart() {
     const getChartData = (id) => {
         return chartsData[id] || {
             symbol: localStorage.getItem(`chart_${id}_symbol`) || localStorage.getItem('chart_symbol') || 'BTCUSDT',
+            exchange: localStorage.getItem(`chart_${id}_exchange`) || localStorage.getItem('chart_exchange') || 'BINANCE',
             timeframe: localStorage.getItem(`chart_${id}_timeframe`) || localStorage.getItem('chart_timeframe') || '1h',
             quantity: parseFloat(localStorage.getItem(`chart_${id}_quantity`) || localStorage.getItem('chart_quantity') || '0.01'),
             activeTool: 'cursor',
@@ -131,15 +132,35 @@ export default function MultiChart() {
 
     }, [layout]);
 
-    // Ensure chartsData is populated for visible charts
+    // Ensure chartsData is populated for visible charts and sanitize symbols
     useEffect(() => {
         setChartsData(prev => {
             const next = { ...prev };
             let changed = false;
             charts.forEach(id => {
-                if (!next[id]) {
-                    next[id] = getChartData(id);
+                let current = next[id];
+                if (!current) {
+                    current = getChartData(id);
+                    next[id] = current;
                     changed = true;
+                }
+
+                // Sanitize: If exchange is Coinbase but symbol is USDT, or vice versa
+                // Or if symbol is PERP on Coinbase (legacy cleanup)
+                if (current.exchange === 'COINBASE') {
+                    if (current.symbol.endsWith('USDT') || current.symbol.endsWith('-PERP')) {
+                        const base = current.symbol.replace('USDT', '').replace('-PERP', '').replace('-USD', '');
+                        // Force to USD
+                        next[id] = { ...current, symbol: `${base}-USD` };
+                        changed = true;
+                    }
+                } else if (current.exchange === 'BINANCE') {
+                    if (current.symbol.endsWith('-USD') || current.symbol.endsWith('-PERP')) {
+                        const base = current.symbol.replace('-USD', '').replace('-PERP', '');
+                        // Force to USDT
+                        next[id] = { ...current, symbol: `${base}USDT` };
+                        changed = true;
+                    }
                 }
             });
             return changed ? next : prev;
@@ -154,6 +175,7 @@ export default function MultiChart() {
 
             // Persist to local storage if relevant fields changed
             if (updates.symbol) localStorage.setItem(`chart_${id}_symbol`, updates.symbol);
+            if (updates.exchange) localStorage.setItem(`chart_${id}_exchange`, updates.exchange);
             if (updates.timeframe) localStorage.setItem(`chart_${id}_timeframe`, updates.timeframe);
             if (updates.quantity) localStorage.setItem(`chart_${id}_quantity`, updates.quantity);
 
@@ -165,6 +187,11 @@ export default function MultiChart() {
     const activeData = chartsData[activeChartId] || getChartData(activeChartId);
 
     const setSymbol = (sym) => updateChartData(activeChartId, { symbol: sym });
+    const setExchange = (ex) => {
+        // When changing exchange, reset symbol to default for that exchange
+        const defaultSym = ex === 'COINBASE' ? 'BTC-USD' : 'BTCUSDT';
+        updateChartData(activeChartId, { exchange: ex, symbol: defaultSym });
+    };
     const setTimeframe = (tf) => updateChartData(activeChartId, { timeframe: tf });
     const setQuantity = (q) => updateChartData(activeChartId, { quantity: q });
     const setActiveTool = (tool) => updateChartData(activeChartId, { activeTool: tool });
@@ -213,6 +240,19 @@ export default function MultiChart() {
                         {activePrice ? activePrice.toFixed(2) : '---'}
                     </div>
 
+                    {/* Exchange Switcher */}
+                    <div className="flex border rounded shadow-sm overflow-hidden bg-white">
+                        {['BINANCE', 'COINBASE'].map(ex => (
+                            <button
+                                key={ex}
+                                onClick={() => setExchange(ex)}
+                                className={`px-2 py-1 text-xs lg:text-sm font-medium transition-colors ${activeData.exchange === ex ? 'bg-orange-600 text-white' : 'hover:bg-gray-100 text-gray-700'}`}
+                            >
+                                {ex === 'BINANCE' ? 'Binance' : 'Coinbase'}
+                            </button>
+                        ))}
+                    </div>
+
                     {/* Timeframes */}
                     <div className="flex border rounded shadow-sm overflow-hidden bg-white">
                         {['1m', '5m', '15m', '1h', '4h', '1d', '1w'].map((tf) => (
@@ -228,13 +268,16 @@ export default function MultiChart() {
 
                     {/* Symbols */}
                     <div className="flex border rounded shadow-sm overflow-hidden bg-white hidden sm:flex">
-                        {['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT'].map((sym) => (
+                        {(activeData.exchange === 'COINBASE'
+                            ? ['BTC-USD', 'ETH-USD', 'SOL-USD']
+                            : ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT']
+                        ).map((sym) => (
                             <button
                                 key={sym}
                                 onClick={() => setSymbol(sym)}
                                 className={`px-2 py-1 text-xs lg:text-sm font-medium transition-colors ${activeData.symbol === sym ? 'bg-blue-600 text-white' : 'hover:bg-gray-100 text-gray-700'}`}
                             >
-                                {sym.replace('USDT', '')}
+                                {sym.replace('USDT', '').replace('-USD', '')}
                             </button>
                         ))}
                     </div>
@@ -279,6 +322,7 @@ export default function MultiChart() {
 
                                 // Controlled Props
                                 symbol={data.symbol}
+                                exchange={data.exchange}
                                 timeframe={data.timeframe}
                                 quantity={data.quantity}
                                 activeTool={data.activeTool}

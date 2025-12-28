@@ -15,6 +15,7 @@ export default function Chart({
     onActivate = () => { },
     // Controlled Props
     symbol = 'BTCUSDT',
+    exchange = 'BINANCE',
     timeframe = '1h',
     quantity = 0.01,
     activeTool = 'cursor',
@@ -2009,7 +2010,7 @@ export default function Chart({
 
             try {
                 setError(null);
-                let url = `/api/market/klines?symbol=${symbol}&interval=${timeframe}&limit=1000`;
+                let url = `/api/market/klines?symbol=${symbol}&interval=${timeframe}&limit=1000&exchange=${exchange}`;
                 if (endTime) {
                     url += `&endTime=${endTime}`;
                 }
@@ -2108,7 +2109,7 @@ export default function Chart({
         // 2.4 WebSocket Setup
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = window.location.host;
-        const wsUrl = `${protocol}//${host}/api/market/ws/klines/${symbol}/${timeframe}`;
+        const wsUrl = `${protocol}//${host}/api/market/ws/klines/${symbol}/${timeframe}?exchange=${exchange}`;
 
         const connect = () => {
             if (isCancelled) return;

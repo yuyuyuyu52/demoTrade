@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from app.database import init_db
 from app.routers import orders, accounts, market, positions, drawings
 from app.services.binance_ws import binance_ws_service
+from app.services.coinbase_ws import coinbase_ws_service
 from app.services.matching_engine import matching_engine
 from app.services.equity_recorder import equity_recorder
 
@@ -15,6 +16,7 @@ async def lifespan(app: FastAPI):
     
     # Start background tasks
     ws_task = asyncio.create_task(binance_ws_service.start())
+    coinbase_ws_task = asyncio.create_task(coinbase_ws_service.start())
     match_task = asyncio.create_task(matching_engine.start())
     equity_task = asyncio.create_task(equity_recorder.start())
     
@@ -22,6 +24,7 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     binance_ws_service.stop()
+    coinbase_ws_service.stop()
     matching_engine.stop()
     equity_recorder.stop()
     # Wait for tasks to finish if needed, or let them be cancelled
