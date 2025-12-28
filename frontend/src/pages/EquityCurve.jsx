@@ -77,13 +77,22 @@ export default function EquityCurve() {
     };
   }, []);
 
-  // Fetch Data
+  // Fetch Data based on timeRange
   useEffect(() => {
     if (!user) return;
 
     const fetchData = async () => {
       try {
-        const res = await axios.get(`${API_URL}/accounts/${user.id}/equity-history`);
+        let params = {};
+        const selectedRange = ranges.find(r => r.value === timeRange);
+        if (selectedRange && selectedRange.duration) {
+          // Convert milliseconds duration to hours for the backend
+          // duration is ms
+          const hours = Math.ceil(selectedRange.duration / (1000 * 60 * 60));
+          params.hours = hours;
+        }
+
+        const res = await axios.get(`${API_URL}/accounts/${user.id}/equity-history`, { params });
 
         // Normalize data
         const rawData = res.data.map(item => ({
@@ -111,79 +120,34 @@ export default function EquityCurve() {
         }
 
         if (uniqueData.length > 0) {
-          setAllData(prev => {
-            // Simple optimization check: if length and last items are same, skip update
-            // Since this is append-only mostly, checking length and last item time/value is sufficient.
-            if (prev.length === uniqueData.length && prev.length > 0) {
-              const lastPrev = prev[prev.length - 1];
-              const lastNew = uniqueData[uniqueData.length - 1];
-              if (lastPrev.time === lastNew.time && lastPrev.value === lastNew.value) {
-                return prev;
-              }
-            }
-            return uniqueData;
-          });
+          // Direct set, no need specific optimization check as timeRange changes completely refresh usually
+          setAllData(uniqueData);
+
+          if (seriesRef.current) {
+            seriesRef.current.setData(uniqueData);
+          }
+          if (chartRef.current) {
+            chartRef.current.timeScale().fitContent();
+          }
+        } else {
+          setAllData([]);
+          if (seriesRef.current) seriesRef.current.setData([]);
         }
+
       } catch (error) {
         console.error("Failed to fetch equity history", error);
       }
     };
 
     fetchData();
+    // Use a simpler polling or none, for now let's poll 5s but respecting current range
     const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
-  }, [user]);
+  }, [user, timeRange]);
 
-  // Track previous time range to only fit content on change
-  const prevTimeRangeRef = useRef('ALL');
+  // Handle Resize
+  // (We handled resizing in first useEffect)
 
-  // Filter and Update Chart
-  useEffect(() => {
-    if (!seriesRef.current || !chartRef.current || allData.length === 0) return;
-
-    let filteredData = allData;
-    const selectedRange = ranges.find(r => r.value === timeRange);
-
-    if (selectedRange && selectedRange.duration) {
-      const cutoff = (Date.now() / 1000) - (selectedRange.duration / 1000);
-      filteredData = allData.filter(d => d.time >= cutoff);
-    }
-
-    if (filteredData.length === 0) {
-      seriesRef.current.setData([]);
-      return;
-    }
-
-    // Uniform Sampling (Evenly take data points)
-    // Increased target to 1000 to avoid jitter on small datasets
-    const TARGET_POINTS = 1000;
-    let sampledData = filteredData;
-
-    if (filteredData.length > TARGET_POINTS) {
-      sampledData = [];
-      const step = (filteredData.length - 1) / (TARGET_POINTS - 1);
-
-      for (let i = 0; i < TARGET_POINTS; i++) {
-        const index = Math.round(i * step);
-        if (index < filteredData.length) {
-          sampledData.push(filteredData[index]);
-        }
-      }
-      // Ensure last point is always included
-      if (sampledData.length > 0 && sampledData[sampledData.length - 1].time !== filteredData[filteredData.length - 1].time) {
-        sampledData.push(filteredData[filteredData.length - 1]);
-      }
-    }
-
-    seriesRef.current.setData(sampledData);
-
-    // Only fit content if time range changed to prevent resetting zoom/scroll on every data update
-    if (prevTimeRangeRef.current !== timeRange) {
-      chartRef.current.timeScale().fitContent();
-      prevTimeRangeRef.current = timeRange;
-    }
-
-  }, [allData, timeRange]);
 
   return (
     <div className="bg-white p-6 rounded-lg shadow-md h-[calc(100vh-64px)] flex flex-col">

@@ -49,7 +49,7 @@ async def get_account(account_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Account not found")
     return await calculate_account_metrics(account)
 @router.get("/{account_id}/equity-history", response_model=list[EquityHistoryResponse])
-async def get_equity_history(account_id: int, hours: int = None, db: AsyncSession = Depends(get_db)):
+async def get_equity_history(account_id: int, hours: int = None, limit: int = 1000, db: AsyncSession = Depends(get_db)):
     stmt = select(EquityHistory).where(EquityHistory.account_id == account_id)
     
     if hours:
@@ -58,7 +58,29 @@ async def get_equity_history(account_id: int, hours: int = None, db: AsyncSessio
         
     stmt = stmt.order_by(EquityHistory.timestamp.asc())
     result = await db.execute(stmt)
-    return result.scalars().all()
+    data = result.scalars().all()
+    
+    # Downsampling in Python to reduce payload size and frontend load
+    if limit > 0 and len(data) > limit:
+        sampled_data = []
+        # Algorithm: Uniformly sample 'limit' points
+        # Always include the first and last point
+        
+        sampled_data.append(data[0])
+        
+        # We need limit-2 intermediate points
+        if limit > 2:
+            step = (len(data) - 1) / (limit - 1)
+            for i in range(1, limit - 1):
+                index = int(i * step)
+                sampled_data.append(data[index])
+        
+        if len(data) > 1:
+            sampled_data.append(data[-1])
+            
+        return sampled_data
+        
+    return data
 
 @router.get("/{account_id}/position-history", response_model=list[PositionHistoryResponse])
 async def get_position_history(account_id: int, db: AsyncSession = Depends(get_db)):
