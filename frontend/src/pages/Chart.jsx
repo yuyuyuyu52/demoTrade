@@ -3,6 +3,7 @@ import { createChart, ColorType, CandlestickSeries, LineStyle, CrosshairMode, cr
 import { CountdownPrimitive } from '../plugins/CountdownPrimitive';
 import { DrawingsPrimitive } from '../plugins/DrawingsPrimitive';
 import { FVGPrimitive } from '../plugins/FVGPrimitive';
+import { VPVRPrimitive } from '../plugins/VPVRPrimitive';
 import { useAuth } from '../context/AuthContext';
 import { Pencil, Square, TrendingUp, ArrowUpCircle, ArrowDownCircle, Trash2, MousePointer2, Settings } from 'lucide-react';
 
@@ -46,6 +47,7 @@ export default function Chart({
     const countdownPrimitiveRef = useRef(null);
     const drawingsPrimitiveRef = useRef(null);
     const fvgPrimitiveRef = useRef(null);
+    const vpvrPrimitiveRef = useRef(null);
     const priceLinesRef = useRef([]);
     const chartRef = useRef(null);
     const lastPriceRef = useRef(null);
@@ -159,7 +161,320 @@ export default function Chart({
 
 
 
+
+    // VPVR State
+    const [showVPVR, setShowVPVR] = useState(false);
+    const showVPVRRef = useRef(false);
+
+    useEffect(() => {
+        showVPVRRef.current = showVPVR;
+        if (vpvrPrimitiveRef.current) {
+            updateVPVR();
+        }
+    }, [showVPVR]);
+
+    // High Precision VPVR Logic
+    // High Precision VPVR Logic
+    const vpvrDebounceRef = useRef(null);
+    const vpvrCacheRef = useRef(new Map()); // Cache: key="interval_start_end", value=data[]
+    const isShowingHighResRef = useRef(false);
+    const lastHighResRangeRef = useRef('');
+
+    const getHighResInterval = (currentTf, visibleDurationSeconds) => {
+        // Dynamic Resolution Scaling
+        // Goal: Request roughly 5000-8000 candles to cover the screen.
+        // Max fetch limit is set to 10 * 1000 = 10000.
+
+        const MAX_CANDLES = 8000;
+
+        // Candidates for high-res: 1m, 5m, 15m, 1h, 4h
+        // We iterate and pick the finest one that fits within MAX_CANDLES
+
+        const intervals = [
+            { tf: '1m', sec: 60 },
+            { tf: '5m', sec: 300 },
+            { tf: '15m', sec: 900 },
+            { tf: '1h', sec: 3600 },
+            { tf: '4h', sec: 14400 },
+            { tf: '1d', sec: 86400 }
+        ];
+
+        // Filter intervals finer or equal to current timeframe (don't use 1d high-res for 1h chart)
+        const currentSec = timeframeToSeconds(currentTf);
+        const candidates = intervals.filter(i => i.sec < currentSec);
+
+        if (candidates.length === 0) return currentTf; // Fallback to current if no finer option
+
+        // Try finest first
+        for (let i = 0; i < candidates.length; i++) {
+            const cand = candidates[i];
+            const needed = visibleDurationSeconds / cand.sec;
+            if (needed <= MAX_CANDLES) {
+                return cand.tf;
+            }
+        }
+
+        // If even the coarsest candidate is too many candles? (Global Zoom Out)
+        // Just return the coarsest candidate (e.g. 4h) or even currentTf.
+        return candidates[candidates.length - 1].tf;
+    };
+
+    const fetchVPVRData = async (symbol, interval, startTime, endTime, exchange) => {
+        const key = `${symbol}_${interval}_${startTime}_${endTime}`;
+        if (vpvrCacheRef.current.has(key)) return vpvrCacheRef.current.get(key);
+
+        try {
+            // Cap limit to avoiding fetching too much: max 5 requests (5000 candles)
+            const allData = [];
+            let currentEnd = endTime;
+
+            for (let i = 0; i < 10; i++) {
+                if (currentEnd <= startTime) break;
+
+                const response = await fetch(`/api/market/klines?symbol=${symbol}&interval=${interval}&limit=1000&endTime=${currentEnd}&exchange=${exchange}`);
+                if (!response.ok) break;
+
+                const raw = await response.json();
+                if (!raw || raw.length === 0) break;
+
+                const parsedChunk = raw.map(d => ({
+                    time: toChartSeconds(d[0], timezone),
+                    low: parseFloat(d[3]),
+                    high: parseFloat(d[2]),
+                    open: parseFloat(d[1]),
+                    close: parseFloat(d[4]),
+                    volume: parseFloat(d[5])
+                }));
+
+                allData.push(...parsedChunk);
+
+                const first = parsedChunk[0];
+                if (first.time * 1000 <= startTime) break;
+                currentEnd = raw[0][0] - 1;
+            }
+
+            // Dedupe and Sort
+            const unique = [];
+            const times = new Set();
+            allData.sort((a, b) => a.time - b.time).forEach(d => {
+                if (!times.has(d.time)) {
+                    times.add(d.time);
+                    unique.push(d);
+                }
+            });
+
+            const filtered = unique.filter(d => d.time * 1000 >= startTime && d.time * 1000 <= endTime);
+            vpvrCacheRef.current.set(key, filtered);
+            return filtered;
+        } catch (e) {
+            console.error("VPVR Fetch Error", e);
+            return null;
+        }
+    };
+
+    const calculateAndSetProfile = (bars, primitive, isHighRes) => {
+        if (!bars || bars.length === 0) return;
+
+        let minPrice = Infinity;
+        let maxPrice = -Infinity;
+        bars.forEach(b => {
+            if (b.low < minPrice) minPrice = b.low;
+            if (b.high > maxPrice) maxPrice = b.high;
+        });
+
+        if (minPrice === Infinity) return;
+
+        const rowCount = 100;
+        const step = (maxPrice - minPrice) / rowCount;
+        if (step === 0) return;
+
+        const buckets = new Array(rowCount).fill(0).map((_, i) => ({
+            price: minPrice + step * (i + 0.5),
+            step: step,
+            totalVolume: 0,
+            upVolume: 0,
+            downVolume: 0,
+            idx: i
+        }));
+
+        bars.forEach(bar => {
+            const barVol = bar.volume || 0;
+            if (barVol === 0) return;
+
+            const barMin = bar.low;
+            const barMax = bar.high;
+            const startBucketIdx = Math.max(0, Math.floor((barMin - minPrice) / step));
+            const endBucketIdx = Math.min(rowCount - 1, Math.floor((barMax - minPrice) / step));
+
+            const span = endBucketIdx - startBucketIdx + 1;
+            const volPerBucket = barVol / span;
+            const isUp = bar.close >= bar.open;
+
+            for (let i = startBucketIdx; i <= endBucketIdx; i++) {
+                buckets[i].totalVolume += volPerBucket;
+                if (isUp) buckets[i].upVolume += volPerBucket;
+                else buckets[i].downVolume += volPerBucket;
+            }
+        });
+
+        // Calculate POC (Point of Control)
+        let maxBucketVol = 0;
+        let pocIdx = 0;
+        let totalVol = 0;
+
+        buckets.forEach((b, i) => {
+            if (b.totalVolume > maxBucketVol) {
+                maxBucketVol = b.totalVolume;
+                pocIdx = i;
+            }
+            totalVol += b.totalVolume;
+        });
+
+        const pocPrice = buckets[pocIdx].price;
+
+        // Calculate Value Area (70%)
+        const targetVol = totalVol * 0.7;
+        let currentVol = buckets[pocIdx].totalVolume;
+        let upIdx = pocIdx;
+        let downIdx = pocIdx;
+
+        while (currentVol < targetVol) {
+            const upVol = (upIdx + 1 < rowCount) ? buckets[upIdx + 1].totalVolume : 0;
+            const downVol = (downIdx - 1 >= 0) ? buckets[downIdx - 1].totalVolume : 0;
+
+            if (upVol === 0 && downVol === 0) break;
+
+            if (upVol >= downVol) {
+                upIdx++;
+                currentVol += upVol;
+            } else {
+                downIdx--;
+                currentVol += downVol;
+            }
+        }
+
+        const vahPrice = buckets[upIdx].price;
+        const valPrice = buckets[downIdx].price;
+
+        primitive.setProfileData({
+            buckets,
+            poc: pocPrice,
+            vah: vahPrice,
+            val: valPrice
+        });
+    };
+
+    // VPVR Calculation
+    const updateVPVR = useCallback(() => {
+        if (!vpvrPrimitiveRef.current || !chartRef.current || !seriesRef.current || !allDataRef.current) return;
+
+        if (!showVPVRRef.current) {
+            vpvrPrimitiveRef.current.setProfileData([]);
+            return;
+        }
+
+        const logicalRange = chartRef.current.timeScale().getVisibleLogicalRange();
+        if (!logicalRange) return;
+
+        const data = allDataRef.current;
+        if (data.length === 0) return;
+
+        const startIdx = Math.max(0, Math.floor(logicalRange.from));
+        const endIdx = Math.min(data.length - 1, Math.ceil(logicalRange.to));
+
+        // Stability Check: If we are showing High Res and range is effectively unchanged, SKIP Low Res overwrite.
+        const rangeKey = `${logicalRange.from.toFixed(2)}_${logicalRange.to.toFixed(2)}`;
+        if (isShowingHighResRef.current && lastHighResRangeRef.current === rangeKey) {
+            return;
+        }
+
+        if (startIdx <= endIdx) {
+            const visibleBars = data.slice(startIdx, endIdx + 1);
+            if (visibleBars.length > 0) {
+                // 1. FAST PREVIEW
+                calculateAndSetProfile(visibleBars, vpvrPrimitiveRef.current, false);
+                isShowingHighResRef.current = false; // Mark as Low Res
+            }
+        }
+
+        // 2. SLOW HIGH-RES FETCH
+        if (vpvrDebounceRef.current) clearTimeout(vpvrDebounceRef.current);
+
+        vpvrDebounceRef.current = setTimeout(async () => {
+            const currentRange = chartRef.current.timeScale().getVisibleLogicalRange();
+            if (!currentRange) return;
+
+            // Recalculate range
+            const sIdx = Math.max(0, Math.floor(currentRange.from));
+            const eIdx = Math.min(data.length - 1, Math.ceil(currentRange.to));
+            if (sIdx > eIdx) return;
+
+            const startBar = data[sIdx];
+            const endBar = data[eIdx];
+            if (!startBar || !endBar) return;
+
+            const startTime = startBar.time * 1000;
+            // Extend endTime to cover the full duration of the last bar
+            const endTime = endBar.time * 1000 + (timeframeToSeconds(timeframe) * 1000);
+
+            const currentRangeKey = `${currentRange.from.toFixed(2)}_${currentRange.to.toFixed(2)}`;
+
+            const targetInterval = getHighResInterval(timeframe, (endTime - startTime) / 1000);
+            if (timeframe === targetInterval) {
+                isShowingHighResRef.current = true;
+                lastHighResRangeRef.current = currentRangeKey;
+                return;
+            }
+
+            const highResData = await fetchVPVRData(symbol, targetInterval, startTime, endTime, exchange);
+            if (highResData && highResData.length > 0) {
+                calculateAndSetProfile(highResData, vpvrPrimitiveRef.current, true);
+                isShowingHighResRef.current = true;
+                lastHighResRangeRef.current = currentRangeKey;
+            }
+        }, 500);
+
+    }, [symbol, timeframe, exchange]);
+
+    // Subscribe to Visible Range Changes
+    useEffect(() => {
+        if (!chartRef.current) return;
+
+        const timeScale = chartRef.current.timeScale();
+        const handleRangeChange = () => {
+            // Debounce or Throttle? Primitive is fast enough usually.
+            // Request Animation Frame?
+            requestAnimationFrame(updateVPVR);
+        };
+
+        timeScale.subscribeVisibleLogicalRangeChange(handleRangeChange);
+
+        return () => {
+            timeScale.unsubscribeVisibleLogicalRangeChange(handleRangeChange);
+        };
+    }, [updateVPVR]); // Re-subscribe if updateVPVR changes (it shouldn't if deps are empty)
+
+
+    // Initialize VPVR Primitive
+    useEffect(() => {
+        if (!chartRef.current || !seriesRef.current || vpvrPrimitiveRef.current) return;
+
+        const vpvr = new VPVRPrimitive({ width: 80 });
+        seriesRef.current.attachPrimitive(vpvr);
+        vpvrPrimitiveRef.current = vpvr;
+
+        // Initial Update
+        updateVPVR();
+
+        return () => {
+            // Cleanup primitive? Lightweight charts auto-cleans attached primitives on chart destroy? 
+            // Currently no easy detach method in primitive interface unless we implemented one?
+            // Usually we assume chart life-cycle manages it.
+        };
+    }, [chartRef.current, seriesRef.current, updateVPVR]); // Wait for chart/series init
+
     // Fetch Settings from Backend
+
     // FVG Calculation
     const calculateFVGs = useCallback((data) => {
         if (!data || data.length < 3) return [];
@@ -2036,6 +2351,7 @@ export default function Chart({
                     high: parseFloat(d[2]),
                     low: parseFloat(d[3]),
                     close: parseFloat(d[4]),
+                    volume: parseFloat(d[5]),
                 }));
 
                 // Deduplicate logic
@@ -2091,6 +2407,8 @@ export default function Chart({
 
                     // Update Overlay
                     if (!endTime) updateOverlayData();
+                    // Update VPVR
+                    updateVPVR();
                 }
 
             } catch (err) {
@@ -2133,6 +2451,7 @@ export default function Chart({
                         high: parseFloat(kline.h),
                         low: parseFloat(kline.l),
                         close: parseFloat(kline.c),
+                        volume: parseFloat(kline.v),
                     };
 
                     if (candle.open > 0 && seriesRef.current) {
@@ -2155,6 +2474,9 @@ export default function Chart({
                         lastPriceRef.current = candle.close;
 
                         updateFVGs();
+                        // Throttle VPVR update on WS (every 1s or just on every tick if fast enough)
+                        // For now, update on every tick to be smooth.
+                        updateVPVR();
                     }
                 } catch (e) {
                     console.error("WS Error", e);
@@ -2378,6 +2700,16 @@ export default function Chart({
                                 type="checkbox"
                                 checked={showFVG}
                                 onChange={(e) => onSettingsChange({ showFVG: e.target.checked })}
+                                className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
+                            />
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                            <label className="text-sm font-medium text-gray-700">Show VPVR</label>
+                            <input
+                                type="checkbox"
+                                checked={showVPVR}
+                                onChange={(e) => setShowVPVR(e.target.checked)}
                                 className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
                             />
                         </div>
