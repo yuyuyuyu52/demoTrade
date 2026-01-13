@@ -2269,7 +2269,7 @@ export default function Chart({
             },
             priceScaleId: 'volume',
             scaleMargins: {
-                top: 0.95, // 成交量占底部5%
+                top: 0.90, // 成交量占底部10%
                 bottom: 0,
             },
             visible: showVolume,
@@ -2278,7 +2278,7 @@ export default function Chart({
         // Explicitly obtain and configure the custom price scale to ensure no padding at bottom
         chart.priceScale('volume').applyOptions({
             scaleMargins: {
-                top: 0.95,
+                top: 0.90,
                 bottom: 0,
             },
             borderVisible: false,
