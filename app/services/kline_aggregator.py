@@ -53,7 +53,14 @@ class KlineAggregator:
         self.max_history = 1000  # 保留最近1000根K线
         self.subscribers = set()  # WebSocket订阅者
         self.ws_task = None
+        self.ws_task = None
         self.is_running = False
+        self.questdb_sender = None
+        self._sender_lock = None  # Initialized in start_aggregation or lazily
+        
+        # Initialize lock immediately if possible, but safe to do in __init__
+        import threading
+        self._sender_lock = threading.Lock()
         
     def _get_kline_start_time(self, timestamp_ms: int) -> int:
         """获取K线开始时间（毫秒）"""
@@ -138,10 +145,23 @@ class KlineAggregator:
             return None
     
     def _save_trade_to_questdb(self, trade: Dict):
-        """Save raw trade to QuestDB (Synchronous)"""
-        try:
-            with Sender('tcp', QUESTDB_HOST, QUESTDB_ILP_PORT) as sender:
-                sender.row(
+        """Save raw trade to QuestDB (Synchronous, with retry & locking)"""
+        if not self.is_running:
+            return
+
+        # Ensure we have a lock
+        if getattr(self, '_sender_lock', None) is None:
+            import threading
+            self._sender_lock = threading.Lock()
+
+        with self._sender_lock:
+            def _write():
+                if self.questdb_sender is None:
+                    # print(f"Creating new QuestDB Sender for {self.symbol}")
+                    self.questdb_sender = Sender('tcp', QUESTDB_HOST, QUESTDB_ILP_PORT)
+                    # Sender handles connection automatically in __init__ or lazily
+
+                self.questdb_sender.row(
                     'trades',
                     symbols={'symbol': self.symbol},
                     columns={
@@ -152,9 +172,43 @@ class KlineAggregator:
                     },
                     at=TimestampNanos(trade['T'] * 1_000_000)
                 )
-                sender.flush()
-        except Exception as e:
-            print(f"QuestDB Trade Write Error: {e}")
+                self.questdb_sender.flush()
+
+            try:
+                _write()
+            except Exception as e:
+                # Check if this is a "Sender is closed" error
+                is_closed_error = "Sender is closed" in str(e)
+                
+                if not self.is_running:
+                    return
+
+                # Only log if it's not a common shutdown noise
+                if not is_closed_error:
+                     print(f"QuestDB write failed ({e}), attempting retry...")
+                
+                # Reset sender on error
+                if self.questdb_sender:
+                    try:
+                        self.questdb_sender.close()
+                    except Exception:
+                        pass
+                    self.questdb_sender = None
+                
+                # Retry once
+                try:
+                    if self.is_running:
+                        _write()
+                except Exception as retry_e:
+                    if "Sender is closed" not in str(retry_e):
+                        print(f"QuestDB Trade Write Error (Final): {retry_e}")
+                    
+                    if self.questdb_sender:
+                        try:
+                            self.questdb_sender.close()
+                        except Exception:
+                            pass
+                        self.questdb_sender = None
 
     async def save_trade_async(self, trade: Dict):
         """Save raw trade to QuestDB (Async wrapper)"""
@@ -342,6 +396,13 @@ class KlineAggregator:
                 await self.ws_task
             except asyncio.CancelledError:
                 pass
+        
+        if self.questdb_sender:
+            try:
+                self.questdb_sender.close()
+            except Exception:
+                pass
+            self.questdb_sender = None
 
 
 # 全局聚合器管理器

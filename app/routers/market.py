@@ -24,7 +24,7 @@ _client_session: Optional[aiohttp.ClientSession] = None
 async def get_client_session() -> aiohttp.ClientSession:
     global _client_session
     if _client_session is None or _client_session.closed:
-        _client_session = aiohttp.ClientSession()
+        _client_session = aiohttp.ClientSession(trust_env=True)
     return _client_session
 
 COINBASE_INTERVAL_MAP = {
@@ -165,17 +165,56 @@ async def get_klines(symbol: str, interval: str, limit: int = 300, endTime: Opti
         if endTime:
             params["endTime"] = endTime
             
-        try:
-            async with session.get(url, params=params) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise HTTPException(status_code=response.status, detail=f"Binance API Error: {error_text}")
-                return await response.json()
-        except Exception as e:
-            # If session is closed or other error, try creating a new one next time
-            if _client_session and _client_session.closed:
-                _client_session = None
-            raise HTTPException(status_code=500, detail=str(e))
+        # Retry logic for Binance API
+        max_retries = 3
+        last_error = None
+        
+        # Use a very short timeout for fail-fast behavior
+        # If we can't connect in 1.5s, it's likely blocked or routing failed
+        timeout = aiohttp.ClientTimeout(total=5, connect=1.5)
+        
+        for attempt in range(max_retries):
+            try:
+                # Use a fresh session for retries if the first one fails
+                # IMPORTANT: fast_env=True is required to pick up system proxy settings
+                current_session = session 
+                if attempt > 0:
+                     current_session = aiohttp.ClientSession(trust_env=True)
+                elif not getattr(session, '_trust_env', False):
+                     # If the global session wasn't created with trust_env, we might need a new one
+                     # But we can't easily swap the global one here. 
+                     # Let's just try, and if it fails, the retry will create a new one with trust_env
+                     pass
+
+                try:
+                    async with current_session.get(url, params=params, timeout=timeout) as response:
+                        if response.status != 200:
+                            error_text = await response.text()
+                            raise HTTPException(status_code=response.status, detail=f"Binance API Error: {error_text}")
+                        return await response.json()
+                finally:
+                    # Close the fresh session if we created one
+                    if current_session is not session:
+                        await current_session.close()
+                        
+            except Exception as e:
+                import os
+                proxy_status = f"HTTP_PROXY={os.environ.get('HTTP_PROXY')}, HTTPS_PROXY={os.environ.get('HTTPS_PROXY')}"
+                print(f"Binance API Request Failed (Attempt {attempt+1}/{max_retries}): {e} | {proxy_status}")
+                last_error = e
+                # Wait a tiny bit
+                await asyncio.sleep(0.2)
+                
+                # Check specifics for session issues
+                if attempt == max_retries - 1:
+                    # If session is closed or other error, try creating a new one next time
+                    if _client_session and _client_session.closed:
+                        _client_session = None
+        
+        # If all retries fail
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Binance API Proxy Failed: {str(last_error)}")
 
 @router.websocket("/ws/klines/{symbol}/{interval}")
 async def websocket_endpoint(websocket: WebSocket, symbol: str, interval: str, exchange: str = "BINANCE"):
