@@ -40,6 +40,36 @@ COINBASE_INTERVAL_MAP = {
 
 @router.get("/klines")
 async def get_klines(symbol: str, interval: str, limit: int = 300, endTime: Optional[int] = None, exchange: str = Query("BINANCE")):
+    # Special handling for 1s interval (not supported by Binance API)
+    if interval == "1s" and exchange.upper() == "BINANCE":
+        from app.services.kline_aggregator import aggregator_manager
+        
+        # Get or create aggregator for this symbol
+        aggregator = aggregator_manager.get_or_create(symbol, interval_seconds=1)
+        
+        # Get historical aggregated klines
+        history = await aggregator.get_history(limit=limit, end_time=endTime)
+        
+        # Format to match Binance API response
+        formatted_klines = []
+        for kline in history:
+            formatted_klines.append([
+                kline['time'],
+                str(kline['open']),
+                str(kline['high']),
+                str(kline['low']),
+                str(kline['close']),
+                str(kline['volume']),
+                kline['closeTime'],
+                "0",  # Quote asset volume (placeholder)
+                kline.get('trades', 0),
+                "0",  # Taker buy base asset volume (placeholder)
+                "0",  # Taker buy quote asset volume (placeholder)
+                "0"   # Ignore
+            ])
+        
+        return formatted_klines
+    
     session = await get_client_session()
     
     if exchange.upper() == "COINBASE":
@@ -150,6 +180,53 @@ async def get_klines(symbol: str, interval: str, limit: int = 300, endTime: Opti
 @router.websocket("/ws/klines/{symbol}/{interval}")
 async def websocket_endpoint(websocket: WebSocket, symbol: str, interval: str, exchange: str = "BINANCE"):
     await websocket.accept()
+    
+    # Special handling for 1s interval
+    if interval == "1s" and exchange.upper() == "BINANCE":
+        from app.services.kline_aggregator import aggregator_manager
+        
+        try:
+            # Get or create aggregator
+            aggregator = aggregator_manager.get_or_create(symbol, interval_seconds=1)
+            
+            # Subscribe to updates
+            aggregator.subscribe(websocket)
+            
+            # Send initial current kline
+            current = aggregator.get_current_kline()
+            if current:
+                message = {
+                    'k': {
+                        't': current['time'],
+                        'o': str(current['open']),
+                        'h': str(current['high']),
+                        'l': str(current['low']),
+                        'c': str(current['close']),
+                        'v': str(current['volume']),
+                        'x': False  # Not final yet
+                    }
+                }
+                await websocket.send_json(message)
+            
+            # Keep connection alive
+            while True:
+                try:
+                    # Wait for client messages (ping/pong)
+                    await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    # Send ping to keep connection alive
+                    try:
+                        await websocket.send_json({"ping": int(time.time() * 1000)})
+                    except:
+                        break
+                except:
+                    break
+                    
+        except WebSocketDisconnect:
+            pass
+        finally:
+            aggregator.unsubscribe(websocket)
+        return
     
     if exchange.upper() == "COINBASE":
         # Auto-map PERP to USD for legacy/public API compatibility

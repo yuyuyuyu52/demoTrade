@@ -30,6 +30,7 @@ export default function Chart({
     // Shared Settings (Controlled from Parent)
     timezone = TIMEZONE,
     showFVG = false,
+    showVPVR = false,
     chartOptions = {
         upColor: '#00C853',
         downColor: '#FF5252',
@@ -182,8 +183,13 @@ export default function Chart({
     }, [showVolume]);
 
     // VPVR State
-    const [showVPVR, setShowVPVR] = useState(false);
-    const showVPVRRef = useRef(false);
+    // showVPVR is now a prop
+    const showVPVRRef = useRef(showVPVR);
+
+    // Sync prop to ref for async/callbacks
+    useEffect(() => {
+        showVPVRRef.current = showVPVR;
+    }, [showVPVR]);
 
     useEffect(() => {
         showVPVRRef.current = showVPVR;
@@ -199,6 +205,20 @@ export default function Chart({
     const isShowingHighResRef = useRef(false);
     const lastHighResRangeRef = useRef('');
 
+    // Reset VPVR State on Symbol/Timeframe/Exchange Change
+    useEffect(() => {
+        isShowingHighResRef.current = false;
+        lastHighResRangeRef.current = '';
+        // We can keep cache or clear it. Let's clear to be safe and avoid mixing context.
+        vpvrCacheRef.current.clear();
+        if (vpvrDebounceRef.current) clearTimeout(vpvrDebounceRef.current);
+
+        // Clear VPVR visual immediately to avoid artifacts
+        if (vpvrPrimitiveRef.current) {
+            vpvrPrimitiveRef.current.setProfileData([]);
+        }
+    }, [symbol, timeframe, exchange]);
+
     const getHighResInterval = (currentTf, visibleDurationSeconds) => {
         // Dynamic Resolution Scaling
         // Goal: Request roughly 5000-8000 candles to cover the screen.
@@ -206,11 +226,13 @@ export default function Chart({
 
         const MAX_CANDLES = 8000;
 
-        // Candidates for high-res: 1m, 5m, 15m, 1h, 4h
+        // Candidates for high-res: 1s (local agg), 1m, 3m, 5m, 15m, 1h, 4h
         // We iterate and pick the finest one that fits within MAX_CANDLES
 
         const intervals = [
+            { tf: '1s', sec: 1 },
             { tf: '1m', sec: 60 },
+            { tf: '3m', sec: 180 },
             { tf: '5m', sec: 300 },
             { tf: '15m', sec: 900 },
             { tf: '1h', sec: 3600 },
@@ -250,7 +272,7 @@ export default function Chart({
             for (let i = 0; i < 10; i++) {
                 if (currentEnd <= startTime) break;
 
-                const response = await fetch(`/api/market/klines?symbol=${symbol}&interval=${interval}&limit=1000&endTime=${currentEnd}&exchange=${exchange}`);
+                const response = await fetch(`/api/market/klines?symbol=${symbol}&interval=${interval}&limit=5000&endTime=${currentEnd}&exchange=${exchange}`);
                 if (!response.ok) break;
 
                 const raw = await response.json();
@@ -267,24 +289,31 @@ export default function Chart({
 
                 allData.push(...parsedChunk);
 
-                const first = parsedChunk[0];
-                if (first.time * 1000 <= startTime) break;
+                // Update boundary for next fetch (older)
                 currentEnd = raw[0][0] - 1;
+
+                // Stop if we covered the startTime
+                if (raw[0][0] <= startTime) break;
             }
+
+            // Filter out data older than startTime
+            // Filter out data based on Time Range (using Shifted Seconds)
+            const startTimeShifted = toChartSeconds(startTime, timezone);
+            const endTimeShifted = toChartSeconds(endTime, timezone);
+            const rawFiltered = allData.filter(d => d.time >= startTimeShifted && d.time <= endTimeShifted);
 
             // Dedupe and Sort
             const unique = [];
             const times = new Set();
-            allData.sort((a, b) => a.time - b.time).forEach(d => {
+            rawFiltered.sort((a, b) => a.time - b.time).forEach(d => {
                 if (!times.has(d.time)) {
                     times.add(d.time);
                     unique.push(d);
                 }
             });
 
-            const filtered = unique.filter(d => d.time * 1000 >= startTime && d.time * 1000 <= endTime);
-            vpvrCacheRef.current.set(key, filtered);
-            return filtered;
+            vpvrCacheRef.current.set(key, unique);
+            return unique;
         } catch (e) {
             console.error("VPVR Fetch Error", e);
             return null;
@@ -432,9 +461,18 @@ export default function Chart({
             const endBar = data[eIdx];
             if (!startBar || !endBar) return;
 
-            const startTime = startBar.time * 1000;
+            const startTime = startBar.originalTimeMs || (startBar.time * 1000);
             // Extend endTime to cover the full duration of the last bar
-            const endTime = endBar.time * 1000 + (timeframeToSeconds(timeframe) * 1000);
+            const endTime = (endBar.originalTimeMs || (endBar.time * 1000)) + (timeframeToSeconds(timeframe) * 1000);
+
+            console.log('[VPVR Debug]', {
+                startUTC: new Date(startTime).toISOString(),
+                endUTC: new Date(endTime).toISOString(),
+                startTs: startTime,
+                endTs: endTime,
+                usingOriginal: !!startBar.originalTimeMs,
+                targetInterval: getHighResInterval(timeframe, (endTime - startTime) / 1000)
+            });
 
             const currentRangeKey = `${currentRange.from.toFixed(2)}_${currentRange.to.toFixed(2)}`;
 
@@ -446,11 +484,36 @@ export default function Chart({
             }
 
             const highResData = await fetchVPVRData(symbol, targetInterval, startTime, endTime, exchange);
+
+            // Fallback logic: check coverage
+            let shouldUseHighRes = false;
             if (highResData && highResData.length > 0) {
+                const fetchedStart = highResData[0].time;
+                const fetchedEnd = highResData[highResData.length - 1].time;
+                const fetchedDuration = fetchedEnd - fetchedStart;
+
+                // Compare with requested range (in Chart Seconds)
+                const reqStartShifted = toChartSeconds(startTime, timezone);
+                const reqEndShifted = toChartSeconds(endTime, timezone);
+                const reqDuration = reqEndShifted - reqStartShifted;
+
+                // Threshold: 50% coverage
+                if (reqDuration < 1 || (fetchedDuration / reqDuration) > 0.5) {
+                    shouldUseHighRes = true;
+                } else {
+                    console.warn('[VPVR] Insufficient HighRes data, falling back to LowRes.', {
+                        fetched: fetchedDuration, requested: reqDuration, ratio: fetchedDuration / reqDuration
+                    });
+                }
+            }
+
+            if (shouldUseHighRes) {
                 calculateAndSetProfile(highResData, vpvrPrimitiveRef.current, true);
                 isShowingHighResRef.current = true;
-                lastHighResRangeRef.current = currentRangeKey;
+            } else {
+                isShowingHighResRef.current = false;
             }
+            lastHighResRangeRef.current = currentRangeKey;
         }, 500);
 
     }, [symbol, timeframe, exchange]);
@@ -2783,7 +2846,7 @@ export default function Chart({
                             <input
                                 type="checkbox"
                                 checked={showVPVR}
-                                onChange={(e) => setShowVPVR(e.target.checked)}
+                                onChange={(e) => onSettingsChange({ showVPVR: e.target.checked })}
                                 className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
                             />
                         </div>

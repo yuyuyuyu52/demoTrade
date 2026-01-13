@@ -2,6 +2,7 @@ export const TIMEZONE = 'Asia/Shanghai';
 
 export const timeframeToSeconds = (tf) => {
     switch (tf) {
+        case '1s': return 1;  // Locally aggregated from aggTrade
         case '1m': return 60;
         case '3m': return 3 * 60;
         case '5m': return 5 * 60;

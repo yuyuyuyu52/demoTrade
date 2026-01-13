@@ -42,6 +42,7 @@ ENV/
 # Database
 *.sqlite3
 *.db
+questdb/
 
 # Temporary scripts
 test_ws_symbol.py

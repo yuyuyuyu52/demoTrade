@@ -22,6 +22,7 @@ export default function MultiChart() {
     const [globalSettings, setGlobalSettings] = useState({
         timezone: 'Asia/Shanghai',
         showFVG: false,
+        showVPVR: false,
         chartOptions: {
             upColor: '#00C853',
             downColor: '#FF5252',
@@ -45,6 +46,7 @@ export default function MultiChart() {
                         setGlobalSettings(prev => ({
                             timezone: s.timezone || prev.timezone,
                             showFVG: s.showFVG !== undefined ? s.showFVG : prev.showFVG,
+                            showVPVR: s.showVPVR !== undefined ? s.showVPVR : prev.showVPVR,
                             chartOptions: { ...prev.chartOptions, ...s.chartOptions }
                         }));
                     }
@@ -255,11 +257,12 @@ export default function MultiChart() {
 
                     {/* Timeframes */}
                     <div className="flex border rounded shadow-sm overflow-hidden bg-white">
-                        {['1m', '5m', '15m', '1h', '4h', '1d', '1w'].map((tf) => (
+                        {['1s', '1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'].map((tf) => (
                             <button
                                 key={tf}
                                 onClick={() => setTimeframe(tf)}
                                 className={`px-2 py-1 text-xs lg:text-sm font-medium transition-colors ${activeData.timeframe === tf ? 'bg-blue-600 text-white' : 'hover:bg-gray-100 text-gray-700'}`}
+                                title={tf === '1s' ? '1秒 (本地聚合)' : ''}
                             >
                                 {tf}
                             </button>
@@ -343,6 +346,7 @@ export default function MultiChart() {
                                 // Shared Settings Props
                                 timezone={globalSettings.timezone}
                                 showFVG={globalSettings.showFVG}
+                                showVPVR={globalSettings.showVPVR}
                                 chartOptions={globalSettings.chartOptions}
                                 onSettingsChange={updateGlobalSettings}
                             />
