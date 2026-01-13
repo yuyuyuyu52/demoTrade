@@ -19,7 +19,7 @@ export default function Layout() {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-100 flex relative">
+    <div className="h-screen bg-gray-100 flex relative overflow-hidden">
       {/* Sidebar */}
       <div
         className={`bg-white shadow-md flex flex-col transition-all duration-300 ease-in-out border-r z-20 ${isSidebarOpen ? 'w-64' : 'w-20'

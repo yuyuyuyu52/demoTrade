@@ -224,7 +224,7 @@ export default function MultiChart() {
     };
 
     return (
-        <div className="flex flex-col h-[calc(100vh-64px)] overflow-hidden bg-gray-100">
+        <div className="flex flex-col h-full overflow-hidden bg-gray-100">
             {/* Top Toolbar (Shared) */}
             <div className="bg-white border-b p-2 flex flex-wrap items-center gap-2 lg:gap-4 shadow-sm z-10">
                 {/* Layout Switcher */}
@@ -316,7 +316,7 @@ export default function MultiChart() {
                 {charts.map(id => {
                     const data = chartsData[id] || getChartData(id);
                     return (
-                        <div key={id} className="relative overflow-hidden bg-white rounded shadow-sm border border-gray-200">
+                        <div key={id} className="relative overflow-hidden bg-white rounded shadow-sm border border-gray-200 h-full">
                             {/* Overlay ID label if needed, or simple active border handled by Chart inner */}
                             <Chart
                                 chartId={id}
