@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { createChart, ColorType, CandlestickSeries, LineStyle, CrosshairMode, createSeriesMarkers } from 'lightweight-charts';
+import { createChart, ColorType, CandlestickSeries, HistogramSeries, LineStyle, CrosshairMode, createSeriesMarkers } from 'lightweight-charts';
 import { CountdownPrimitive } from '../plugins/CountdownPrimitive';
 import { DrawingsPrimitive } from '../plugins/DrawingsPrimitive';
 import { FVGPrimitive } from '../plugins/FVGPrimitive';
@@ -43,6 +43,7 @@ export default function Chart({
     const { user } = useAuth();
     const chartContainerRef = useRef();
     const seriesRef = useRef(null);
+    const volumeSeriesRef = useRef(null);
     const markersPrimitiveRef = useRef(null);
     const countdownPrimitiveRef = useRef(null);
     const drawingsPrimitiveRef = useRef(null);
@@ -156,11 +157,29 @@ export default function Chart({
                     colors: { up: chartOptions.upColor, down: chartOptions.downColor }
                 });
             }
+
+            // Update Volume Series Colors
+            if (volumeSeriesRef.current && allDataRef.current.length > 0) {
+                volumeSeriesRef.current.setData(allDataRef.current.map(d => ({
+                    time: d.time,
+                    value: d.volume,
+                    color: d.close >= d.open ? chartOptions.upColor : chartOptions.downColor,
+                })));
+            }
         }
     }, [chartOptions]);
 
 
 
+
+    // Volume State
+    const [showVolume, setShowVolume] = useState(true);
+
+    useEffect(() => {
+        if (volumeSeriesRef.current) {
+            volumeSeriesRef.current.applyOptions({ visible: showVolume });
+        }
+    }, [showVolume]);
 
     // VPVR State
     const [showVPVR, setShowVPVR] = useState(false);
@@ -2172,9 +2191,39 @@ export default function Chart({
 
         seriesRef.current = newSeries;
 
+        // Add Volume Series
+        const volumeSeries = chart.addSeries(HistogramSeries, {
+            color: '#26a69a',
+            priceFormat: {
+                type: 'volume',
+            },
+            priceScaleId: 'volume',
+            scaleMargins: {
+                top: 0.95, // 成交量占底部5%
+                bottom: 0,
+            },
+            visible: showVolume,
+        });
+
+        // Explicitly obtain and configure the custom price scale to ensure no padding at bottom
+        chart.priceScale('volume').applyOptions({
+            scaleMargins: {
+                top: 0.95,
+                bottom: 0,
+            },
+            borderVisible: false,
+        });
+
+        volumeSeriesRef.current = volumeSeries;
+
         // Restore Data instantly if available (e.g. after timezone switch)
         if (allDataRef.current && allDataRef.current.length > 0) {
             newSeries.setData(allDataRef.current);
+            volumeSeries.setData(allDataRef.current.map(d => ({
+                time: d.time,
+                value: d.volume,
+                color: d.close >= d.open ? chartOptions.upColor : chartOptions.downColor,
+            })));
             // Optionally autoScale?
             // chart.timeScale().fitContent();
         }
@@ -2260,6 +2309,7 @@ export default function Chart({
             // Clear refs
             chartRef.current = null;
             seriesRef.current = null;
+            volumeSeriesRef.current = null;
             markersPrimitiveRef.current = null;
             countdownPrimitiveRef.current = null;
             drawingsPrimitiveRef.current = null;
@@ -2386,6 +2436,13 @@ export default function Chart({
                     // Update Series
                     if (seriesRef.current && chartRef.current && !isCancelled) {
                         seriesRef.current.setData(allDataRef.current);
+                        if (volumeSeriesRef.current) {
+                            volumeSeriesRef.current.setData(allDataRef.current.map(d => ({
+                                time: d.time,
+                                value: d.volume,
+                                color: d.close >= d.open ? chartOptions.upColor : chartOptions.downColor,
+                            })));
+                        }
 
                         if (!endTime) {
                             isChartReadyRef.current = true;
@@ -2456,6 +2513,13 @@ export default function Chart({
 
                     if (candle.open > 0 && seriesRef.current) {
                         seriesRef.current.update(candle);
+                        if (volumeSeriesRef.current) {
+                            volumeSeriesRef.current.update({
+                                time: candle.time,
+                                value: candle.volume,
+                                color: candle.close >= candle.open ? chartOptions.upColor : chartOptions.downColor,
+                            });
+                        }
 
                         // Update buffer
                         const lastData = allDataRef.current[allDataRef.current.length - 1];
@@ -2700,6 +2764,16 @@ export default function Chart({
                                 type="checkbox"
                                 checked={showFVG}
                                 onChange={(e) => onSettingsChange({ showFVG: e.target.checked })}
+                                className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
+                            />
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                            <label className="text-sm font-medium text-gray-700">Show Volume</label>
+                            <input
+                                type="checkbox"
+                                checked={showVolume}
+                                onChange={(e) => setShowVolume(e.target.checked)}
                                 className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
                             />
                         </div>
