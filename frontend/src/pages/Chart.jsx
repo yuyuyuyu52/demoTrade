@@ -269,10 +269,10 @@ export default function Chart({
             const allData = [];
             let currentEnd = endTime;
 
-            for (let i = 0; i < 10; i++) {
+            for (let i = 0; i < 15; i++) {
                 if (currentEnd <= startTime) break;
 
-                const response = await fetch(`/api/market/klines?symbol=${symbol}&interval=${interval}&limit=5000&endTime=${currentEnd}&exchange=${exchange}`);
+                const response = await fetch(`/api/market/klines?symbol=${symbol}&interval=${interval}&limit=1000&endTime=${currentEnd}&exchange=${exchange}`);
                 if (!response.ok) break;
 
                 const raw = await response.json();
@@ -1329,17 +1329,24 @@ export default function Chart({
                     };
                 });
 
-                // Store markers in ref for click detection
-                filledOrdersRef.current = markers;
-
                 // Sort markers by time
                 markers.sort((a, b) => a.time - b.time);
 
+                // Filter markers to prevent stacking on the first candle if history is missing
+                let visibleMarkers = markers;
+                if (allDataRef.current && allDataRef.current.length > 0) {
+                    const startTime = allDataRef.current[0].time;
+                    visibleMarkers = markers.filter(m => m.time >= startTime);
+                }
+
+                // Store markers in ref for click detection
+                filledOrdersRef.current = visibleMarkers;
+
                 if (seriesRef.current) {
                     if (!markersPrimitiveRef.current) {
-                        markersPrimitiveRef.current = createSeriesMarkers(seriesRef.current, markers);
+                        markersPrimitiveRef.current = createSeriesMarkers(seriesRef.current, visibleMarkers);
                     } else {
-                        markersPrimitiveRef.current.setMarkers(markers);
+                        markersPrimitiveRef.current.setMarkers(visibleMarkers);
                     }
                 }
             }
@@ -2526,7 +2533,8 @@ export default function Chart({
                     updateFVGs();
 
                     // Update Overlay
-                    if (!endTime) updateOverlayData();
+                    // Update Overlay (always refresh markers as data range expands)
+                    updateOverlayData();
                     // Update VPVR
                     updateVPVR();
                 }
